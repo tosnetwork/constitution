@@ -1133,15 +1133,15 @@ invalidates every entry derived from the affected subtree:
 | parameter 4 or a root delegation changed | the entire cache |
 | trusted finalized checkpoint moved backwards (reorg) | every entry resolved at or after the abandoned checkpoint |
 
-**The one cache that exists today satisfies none of this.**
-`rldp-http-proxy/DNSResolver` keys a `std::map` by host string with a flat
-300-second hard and 270-second soft timeout (`DNSResolver.cpp:31-32, 55-67`).
-It never consults auction or `last_fill_up_time` state, never learns of a record update, never reacts to
-a checkpoint change, is never bounded in size, and never evicts — an attacker
-who can drive lookups grows it without limit. Bringing it in line with this
-section, and gating `.tos` acceptance in the proxy on the finalized-root,
-hop-limit, cycle, lifecycle, and record-validation rules of §5.5 and §8, is
-required work in the `tos` row of §11.
+**Current state of the one cache that exists.** `rldp-http-proxy/DNSResolver`
+is bounded at 1024 entries with expired-first eviction, reads the answering
+item's `get_auction_info` and `get_last_fill_up_time` before serving or
+caching a record (failing closed on auctioning, unfinalized, overdue, or
+unverifiable names), and caps every entry's lifetime at the derived renewal
+deadline, evicting a cached name the moment a refresh sees an unhealthy
+lifecycle. It does not yet learn of record updates or checkpoint changes
+mid-lifetime beyond its base 300-second expiry; record-update and
+reorg-driven invalidation remain open work in the `tos` row of §11.
 
 ### 8.3 Reverse lookup
 
