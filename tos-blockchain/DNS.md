@@ -5,9 +5,13 @@
 - **Canonical public suffix:** `.tos`
 
 This document is a target design, not a deployment claim. The inherited
-resolver primitives exist, but the `.tos` registrar, domain NFT, bid-vault,
-cross-repository APIs, and production activation described below still require
-implementation and acceptance evidence.
+resolver primitives exist, and TOS has established two dedicated repositories:
+`tosnetwork/dns-contract`, forked from the TON reference contracts, owns the
+on-chain naming product; `tosnetwork/tos-domains` owns the registrar and
+management application. Both still require TOS implementation and acceptance
+evidence. The auction and renewal rules intentionally follow the current TON
+contracts; Agent-native APIs and production activation are TOS integrations,
+not capabilities inherited from TON.
 
 ## 1. Design Purpose
 
@@ -29,8 +33,8 @@ The design has five goals:
 1. preserve the hierarchical resolver interface already implemented in TOS;
 2. make second-level `.tos` ownership transferable and wallet-compatible by
    representing each name as a TOS-TEP-62 NFT;
-3. prevent mempool name theft and reduce permanent squatting through a
-   commit-reveal auction and renewable leases;
+3. keep the auction, renewal, and release state machine aligned with the latest
+   official TON DNS contract, with no TOS-only redesign by default;
 4. make names useful across the Agent, service, Messenger, wallet, explorer,
    Sites, and Storage layers; and
 5. keep the authority boundary strict: a name is an alias and discovery hint,
@@ -112,46 +116,194 @@ registering resolver is not the proposed `.tos` collection/NFT contract and
 must not be activated as the production registrar without a separate security
 review.
 
+### 3.1 What the current code does *not* provide
+
+The following statements were verified against the working tree and must not be
+assumed away by an implementer:
+
+- **Configuration parameter 4 is unset at genesis.**
+  `tos/crypto/smartcont/gen-zerostate.fif` never writes parameter 4, and
+  `crypto/fift/lib/` has no `config.dns_root!` helper. On a network built from
+  the current zero state, `block::Config::get_dns_root_addr()`
+  (`crypto/block/mc-config.cpp:869`) returns
+  `configuration parameter 4 ... is absent` and every client-side resolution
+  fails closed. A governance action is required on an existing network. Whether
+  new genesis/proposal code is required is not yet established: Phase 0 first
+  exercises the generic Config Contract and zero-state tooling, then adds only
+  the wrappers or helpers that the evidence shows are missing.
+- **Parameter 4 is neither mandatory nor critical.** The genesis lists are
+  `mandatory_params = (0 1 9 10 12 14 15 16 17 18 20 21 22 23 24 25 28 34)` and
+  `critical_params = (-999 -1000 -1001 0 1 3 9 10 12 14 15 16 17 32 34 36)`
+  (`gen-zerostate.fif:208-209`); the validator-side mandatory list is
+  `{18, 20, 21, 22, 23, 24, 25, 28, 34}` (`crypto/block/block.cpp:1885`).
+  Parameter 4 appears in none of them, so replacing the entire `.tos` root
+  resolver would today pass under the *ordinary* proposal setup
+  `(2 3 2 2 ...)` rather than the critical setup `(4 7 4 2 ...)`. See §5.1.
+- **Only two category constants are pinned by code.**
+  `sha256("dns_next_resolver")` is fixed in
+  `crypto/smc-envelope/ManualDns.h:34`, `crypto/smartcont/dns-manual-code.fc:347`
+  and `crypto/smartcont/dns-auto-code.fc:480`; `sha256("site")` is fixed in
+  `rldp-http-proxy/DNSResolver.cpp:69`. `wallet`, `storage`, `text`, `agent`,
+  `capability`, and `messenger` are **not** referenced anywhere in TOS code and
+  are proposals of this document (§7).
+- **There is no deployed TOS-adapted production `.tos` collection or domain
+  item.** The established `tosnetwork/dns-contract` repository is currently an
+  unmodified fork whose README and contracts still describe the `.ton` zone.
+  `crypto/smartcont/` contains only `dns-manual-code.fc` and `dns-auto-code.fc`.
+  The DNS collection and item sources under
+  `crypto/func/auto-tests/legacy_tests/dns-collection/` and
+  `.../tele-nft-item/` are **FunC compiler test fixtures inherited from TON**.
+  They are useful as behavioural references (§5.2, §5.4) and are cited as such
+  below, but they are not TOS contracts, are not audited, and must not be
+  deployed.
+- **There is no DNS-specific code-hash policy.** TOS has an on-chain
+  audited-code registry only for AIPoW (`ConfigParam 93`). Nothing equivalent
+  exists for a root resolver, collection, or item. Production must pin
+  reproducible hashes and an upgrade policy, but §10 deliberately leaves open
+  whether enforcement is on-chain, in immutable contract policy, or in client
+  release manifests.
+
 The reusable idea from TON DNS is the split between a small root resolver, a
 TLD resolver/collection, and per-domain resolver contracts. TOS extends that
 model for its own Agent-native ecosystem and does not inherit TON deployment
-addresses, `.ton` ownership, auction parameters, or governance decisions.
+addresses, `.ton` ownership, or governance decisions. Its auction algorithm is
+the compatibility baseline; deployment-time timestamps and TOS-denominated
+constants remain explicit network choices.
+
+### 3.2 Reuse boundary and delivery profiles
+
+Creating `.tos` does **not**, by itself, require a consensus, TVM, TL-B record,
+Lite Server, or validator change. The suffix is selected by the root contract's
+data, and the existing parameter-4 and `dnsresolve` ABI are already sufficient
+to route `tos\0` to a collection. The existing `dns_smc_address` encoding is
+also sufficient for the proposed `wallet`, `agent`, `capability`, and
+`messenger` categories; category names are hashes and do not require a new
+`DNSRecord` constructor.
+
+Work is divided into two profiles so that inherited compatibility is not
+confused with TOS policy:
+
+| Profile | Purpose | Required repositories | Effect on `tos` core |
+|---|---|---|---|
+| **Baseline port** | Prove that the TON reference Root/Collection/Item model can register and resolve `.tos` on a TOS localnet | `dns-contract`, `TIP`, deployment configuration, one inspection client | No consensus or TVM change. Use existing generic configuration tooling where it is sufficient; add only missing parameter-4 deployment scripts or confirmed boundary fixes. |
+| **TOS production profile** | Keep the upstream auction/lifecycle contract unchanged while adding code-hash publication, resolver provenance, safe lifecycle interpretation, and Agent-native integrations | Baseline repositories plus `tos-domains`, wallets, explorer, service and Messenger repositories | No consensus or TVM change. Client/API hardening is gated independently from contract parity. |
+
+The baseline port is an engineering compatibility milestone, not a public
+namespace or a promise of mainnet ownership. Production retains the inherited
+open ascending auction. Any future auction redesign requires a separate TIP and
+must not be smuggled into Agent-native or client work. Provenance results,
+code-hash publication, and Agent-native records remain TOS integrations.
+
+Repository ownership follows the same boundary:
+
+- `tosnetwork/dns-contract` owns Root, Collection, Domain Item, auction,
+  lifecycle, contract build artifacts, and contract tests;
+- `tosnetwork/tos` owns only inherited platform primitives, parameter-4
+  activation support, generally useful resolver/API fixes, SDKs, and operator
+  tooling; and
+- `tosnetwork/tos-domains` is a non-custodial application and never defines
+  protocol bytes independently of the TIP and shared vector corpus.
 
 ## 4. Name Syntax and Canonicalization
 
-### 4.1 Version 1 labels
+### 4.1 Inherited registration labels and UI policy
 
-Version 1 accepts only lowercase ASCII labels:
+The Collection keeps the upstream registration rule exactly: the plaintext
+second-level label is byte-aligned, is 4 through 126 bytes, and contains only
+lowercase ASCII `[a-z0-9-]`. Leading or trailing hyphens and `xn--` are not
+special to the contract. Registration software must not describe a stricter
+frontend convention as an on-chain rule or reject resolution of a name that
+the contract validly registered.
 
-```text
-label = [a-z0-9] ([a-z0-9-]{0,61} [a-z0-9])?
-```
+For safer presentation, `tos-domains` and wallets should recommend labels no
+longer than 63 bytes, reject leading/trailing hyphens and `xn--`, reserve
+confusable Unicode, and show the exact lowercase label before signing. These
+are UX protections only. A direct contract caller can register any label that
+satisfies the inherited rule, so resolvers and indexers must support it subject
+to the full-name encoding bound in Section 4.2.
 
-Rules:
+For lookup, a UI may offer to lowercase human input after showing the
+canonicalized result. Signed transactions and durable identifiers use the
+exact on-chain label. Empty components, control characters, spaces, `/`, `:`,
+NUL, and a trailing dot are rejected by public name-entry interfaces.
 
-- each label is 1 to 63 bytes;
-- the complete name is at most 126 bytes before internal encoding;
-- uppercase input is converted to lowercase before display or signing;
-- leading and trailing hyphens are forbidden;
-- empty labels, control characters, spaces, `/`, `:`, and NUL are forbidden;
-- `xn--` labels are reserved in v1; and
-- Unicode registration is deferred until a reviewed normalization and
-  confusable-character policy exists.
-
-Clients must reject invalid names before constructing a transaction. Contracts
-must independently enforce the same rules.
-
-### 4.2 Internal representation
+### 4.2 Internal representation and the exact length bound
 
 Resolution retains the existing TOS/TON-compatible encoding: split the name on
 dots, reverse the components, append a zero byte to every component, and
-concatenate them.
+concatenate them (`DnsInterface::encode_name`,
+`crypto/smc-envelope/ManualDns.cpp:625-643`).
 
 ```text
-translate.alice.tos -> tos\0alice\0translate\0
+translate.alice.tos -> tos\0alice\0translate\0      (20 bytes)
 ```
 
-The canonical wire bytes, category hashes, commitment hashes, deterministic
+**Encoded length is always the dotted length plus one.** A name with `L` labels
+whose dotted form is `V` bytes contains `L-1` dots and `sum(label_len) = V-(L-1)`;
+the encoded form replaces every dot with a NUL and appends one more, giving
+`V-(L-1)+L = V+1` bytes regardless of how the labels are split. The label count
+therefore does not affect the total, and the frequently repeated claim that
+"each label adds a byte" is wrong.
+
+The binding limit is on the encoded slice:
+
+- `dnsresolve` receives the encoded name as the data bits of a single cell. A
+  cell holds at most 1023 bits, so 127 bytes (1016 bits) fit and 128 bytes do
+  not.
+- Both clients enforce this explicitly:
+  `DnsInterface::resolve_args_raw` rejects `encoded_name.size() > 127`
+  (`ManualDns.cpp:199`), and `TestNode::dns_resolve_start` rejects
+  `qdomain.size() > 127` (`lite-client.cpp:1834`).
+- TEP-81 states the same bound (`n` at most 127) for the inherited ABI.
+
+**Normative resolver rule:** the encoded name is at most **127 bytes**, so the
+dotted name is at most **126 bytes**. For a direct second-level `.tos` name,
+this means at most 122 label bytes (`label.tos` plus the final encoded NUL).
+The upstream Collection nevertheless accepts labels up to 126 bytes. Frontends
+must refuse to bid on labels that cannot be resolved from the configured root
+and explain why; changing the Collection's inherited upper bound would be a
+contract fork and is not part of v1.
+
+Two boundary defects in the current clients must be fixed rather than
+documented around; both belong to the `tos` row of §11:
+
+- `DnsInterface::get_default_max_name_size()` returns **128**
+  (`ManualDns.h:193-195`), and `resolve_args` / `resolve_raw_or_throw` gate on
+  it (`ManualDns.cpp:212`, `ManualDns.cpp:512`). A 127- or 128-byte dotted name
+  therefore passes the SDK's advertised limit and then fails deeper with
+  `DNS encoded name is too long`. The constant must become 126.
+- `TestNode::dns_resolve_finish` accepts a consumed-bit count only up to
+  `8 * min(qdomain.size(), 126)` (`lite-client.cpp:1958`). A resolver that
+  legitimately consumes all 1016 bits of a 127-byte slice in one hop is
+  rejected as "too many bits used". The `.tos` chain never reaches this case
+  because the root consumes `tos\0` first, but `dnsresolvestep` against a
+  domain item can, so the bound must become `qdomain.size()`.
+
+**Trailing dots are not neutral.** `encode_name("alice.tos.")` yields
+`\0tos\0alice\0` — a *leading* NUL byte — which is the "resolve relative to this
+resolver" form (equivalent to the Lite Client's `mode & 2`, `lite-client.cpp:1826`,
+and to Toslib's forced trailing dot on the explicit-resolver path,
+`toslib/toslib/ToslibClient.cpp:5551-5553`). `alice.tos` and `alice.tos.` are
+therefore *different queries*, not two spellings of one name. v1 rejects a
+trailing dot in user input and exposes the leading-NUL form only as an explicit
+"resolve as a step against this resolver" flag in tooling.
+
+Boundary vectors that the TIP corpus must contain verbatim:
+
+| Case | Dotted input | Encoded bytes | Expected |
+|---|---|---|---|
+| Lookup-only short label | `a.tos` | `tos\0a\0` (6) | resolver accepts; Collection registration rejects length `< 4` |
+| Maximum | any canonical name of exactly 126 bytes | 127 | accept |
+| One over | any canonical name of exactly 127 bytes | 128 | reject, `encoded name too long` |
+| Label count invariance | 126-byte name as 2 labels vs. 21 labels | 127 in both | accept both |
+| Trailing dot | `alice.tos.` | `\0tos\0alice\0` (11) | reject at input |
+| Empty label | `a..tos` | — | reject at input |
+| Bare separator | `.` | `\0` (1) | reject at input; valid only as an internal self-query |
+| Uppercase | `Alice.tos` | — | reject for registration/mutation; lowercase only for lookup |
+| Non-ASCII | `älice.tos` | — | reject in v1 |
+| `xn--` | `xn--80ak6aa92e.tos` | valid encoding | contract accepts; public UI warns/refuses by policy |
+
+The canonical wire bytes, category hashes, auction thresholds, deterministic
 contract addresses, and negative cases must be frozen as cross-language test
 vectors before mainnet activation.
 
@@ -183,8 +335,15 @@ finalized masterchain config parameter 4
 
 ### 5.1 Root DNS resolver
 
-The root resolver resides in the masterchain. Its address is read from
-configuration parameter 4 at a finalized masterchain block.
+Configuration parameter 4 is `dns_root_addr:bits256`
+(`crypto/block/block.tlb:640`). It carries **only 256 address bits**; the
+workchain is not stored and every client hard-codes the masterchain
+(`Config::get_dns_root_addr()` returns bare bits, and callers wrap it as
+`block::StdAddress(masterchainId, addr)` —
+`toslib/toslib/ToslibClient.cpp:5959`, `lite-client/lite-client.cpp:1843-1845`).
+The root resolver must therefore live in the masterchain; a workchain-0 root is
+unreachable through the existing ABI and would require a versioned parameter
+change.
 
 The root contract should do very little:
 
@@ -193,170 +352,455 @@ The root contract should do very little:
 - optionally delegate future TOS-owned suffixes after governance approval; and
 - expose version and code-hash getters for operational verification.
 
-The root must not sell names or store user records. Changing parameter 4 or a
-root delegation is a chain-governance operation with an announced activation
-block and audited code hash.
+The root must not sell names or store user records.
+
+**Four distinct change surfaces must not be conflated.** Each has a different
+authority, blast radius, and required evidence:
+
+| Change | Mechanism | Blast radius | Required gate |
+|---|---|---|---|
+| Parameter 4 value | masterchain config proposal | replaces the entire namespace root for every client | explicit mainnet governance decision below |
+| Root resolver data (which suffix delegates where) | internal message to the root contract, under its own owner policy | replaces the `.tos` collection for every name | announced activation block; audited collection code hash |
+| `.tos` collection replacement | root delegation change to a newly deployed Collection | registrar policy and deterministic item address for names under the new Collection | upstream-parity report, migration plan, new address vectors, and explicit governance activation |
+| Domain item code in a Collection | immutable code cell used in StateInit | changing it changes every derived item address under that Collection | treat as a new Collection deployment; never mutate or silently substitute it |
+
+**Parameter 4 is currently an ordinary-vote parameter.** As shown in §3.1 it
+appears in neither `mandatory_params` nor `critical_params`, so under the
+genesis configuration a proposal that replaces the root resolver clears with
+`min_tot_rounds=2, max_tot_rounds=3, min_wins=2, max_losses=2` — a weaker
+threshold than the one protecting the config, elector, and fee-collector
+addresses (parameters 0, 1, 3). Silently redirecting `.tos` is at least as
+severe as changing the fee collector.
+
+**Decision required before mainnet, not before the baseline port:** governance
+must either add parameter 4 to `critical_params` (ConfigParam 10, itself a
+critical parameter) before or as part of the announced activation sequence, or
+publish and approve an alternative root-protection policy with an equivalent
+threat analysis. The two configuration changes need not be falsely described
+as one atomic proposal if the Config Contract cannot express that operation.
+In every case, clients treat an absent parameter 4 as "DNS unavailable", never
+as "name not found". Until a policy is selected and activated, this document
+makes no claim that the root is governance-protected.
+
+The upstream Collection has no TOS-specific emergency auction pause. Adding one
+would be a semantic fork and is outside v1. The inherited Domain Item does,
+however, implement `process_governance_decision`: an entry for its item index in
+ConfigParam 80 can authorize transfer or destruction. TOS must explicitly
+govern and disclose this seizure path rather than claim that it does not exist.
+Incident response may protect frontend access and publish warnings, but must
+not invent additional mutation authority.
 
 ### 5.2 `.tos` collection and registrar
 
-The `.tos` contract is both:
+The `.tos` collection is a direct TOS deployment of the latest reviewed
+`ton-blockchain/dns-contract` Collection contract. At the time of this review,
+`tosnetwork/dns-contract:main` and `ton-blockchain/dns-contract:main` are
+identical at commit `d08131031fb659d2826cccc417ddd9b98476f814`
+(`root dns 2.0`). Before any implementation commit, the TOS fork must compare
+against upstream `main` and incorporate newer compatible fixes first.
 
-- the TLD resolver for second-level labels; and
-- a TOS-TEP-62 NFT collection whose items are domain contracts.
+The collection:
 
-The NFT item index is:
+- implements the TOS-TEP-62 collection getters;
+- validates a registration label and its minimum opening value;
+- checks the optional reserved-name configuration used by the upstream
+  contract, if TOS governance chooses and can represent that configuration;
+- derives the Domain Item address;
+- deploys the Domain Item with the caller as its first bidder; and
+- implements `dnsresolve` by returning the derived item as
+  `dns_next_resolver`.
+
+It does not keep a second auction state machine, enumerate names, custody
+refunds, or carry Agent-native authority.
+
+#### Item index - preserve the upstream rule
+
+The upstream collection computes:
 
 ```text
-label_hash = sha256(canonical_label_utf8)
-item_index = uint256(label_hash)
+item_index = slice_hash(canonical_label_slice)
 ```
 
-The domain item address is deterministically derived from the collection
-address, item index, and pinned item code. Clients must derive this address
-locally and reject a collection response that names a different item.
+Here `slice_hash` is the TVM `HASHSU` representation hash of the cell that
+holds the label slice. It is not a plain `SHA256(label_bytes)` digest. The TOS
+contract, SDKs, wallets, explorer, and shared vectors must reproduce the
+upstream operation exactly. Changing it would change every deterministic Domain
+Item address and needlessly break compatibility.
 
-The collection stores or commits:
+The label slice contains the second-level label only, without `.tos` and
+without a trailing NUL. The TIP corpus must include:
 
-- the domain-item code and code hash;
-- auction and renewal parameter versions;
-- the fee-sink address selected by TOS governance;
-- a hash commitment to the launch reservation list;
-- the minimum registration deposit and resource bounds; and
-- the next allowed contract-version activation point.
+- the upstream `slice_hash` result for `alice`;
+- a negative vector showing that plain SHA-256 yields a different value; and
+- the resulting StateInit and Domain Item address.
 
-There is no mutable administrator power to transfer an active user domain.
-Emergency response may pause new auctions, but must not silently rewrite
-ownership or records.
+#### Deterministic item address
+
+The address follows the upstream layout without modification:
+
+```text
+item_data      = uint256(item_index) || MsgAddressInt(collection_address)
+state_init     = split_depth:nothing  special:nothing
+                 code:just(^domain_item_code)  data:just(^item_data)
+                 library:nothing
+item_address   = addr_std(anycast:nothing, workchain, cell_hash(state_init))
+```
+
+The exact item code cell, collection address, item index, workchain, and
+StateInit layout determine the address. Mainnet/testnet separation comes from
+different collection addresses and roots, not from adding a network identifier
+to this derivation.
+
+The upstream Collection stores one item-code cell and exposes
+`get_nft_address_by_index(index)`. Clients derive locally with that same code
+and require the getter to match. TOS v1 does not add per-item code-version
+getters or silently move an existing label to a different item address. A
+future item-code migration requires a separate TIP and explicit collection
+migration plan.
+
+#### TOS-TEP-62 DNS collection profile
+
+The upstream collection intentionally returns:
+
+```text
+get_collection_data() -> (-1, collection_content, addr_none)
+```
+
+because item indices are hashes rather than a sequential mint counter. TOS keeps
+that behavior. The TOS-TEP-62 DNS profile must document:
+
+1. `next_item_index = -1` means a non-sequential collection;
+2. `get_nft_address_by_index(uint256)` is the discovery getter;
+3. wallets and explorers must not enumerate such a collection by incrementing
+   an index;
+4. JSON and SDK representations preserve the complete 256-bit signed/unsigned
+   VM integer without narrowing it to `int64`; and
+5. ownership and transfer remain NFT-compatible even though enumeration is not.
+
+The existing TOS JSON-RPC narrowing bug is a generic tooling fix in Section 11,
+not a reason to change the DNS contract index.
+
+#### Allowed collection differences
+
+A TOS port may change only values that cannot correctly remain TON-specific:
+
+- collection metadata and public `.tos` presentation;
+- the Root delegation from `ton\0` to `tos\0`;
+- deployment addresses, workchain selection, and build artifacts;
+- the launch timestamp and TOS-denominated economic constants approved for the
+  deployment; and
+- a reservation/configuration identifier only if TOS governance explicitly
+  adopts that optional upstream feature.
+
+Auction message formats, operation codes, item storage, item-index hashing,
+bid ordering, refund behavior, duration/prolongation formulas, renewal, and
+release semantics remain upstream-compatible. Any additional difference
+requires a TIP, a source-level upstream diff, new vectors, and independent
+review.
 
 ### 5.3 Domain NFT item
 
-Each second-level name, such as `alice.tos`, is one smart contract implementing:
+Each second-level name, such as `alice.tos`, is one permanent smart contract
+using the upstream Domain Item storage and interfaces. It implements:
 
-- the TOS-TEP-62 NFT item interface;
-- `dnsresolve`;
-- record set/delete operations;
-- subdomain resolver delegation;
-- auction settlement;
-- renewal and expiry; and
-- explicit ownership transfer through the NFT interface.
+- the editable TOS-TEP-62 NFT item interface;
+- the public ascending auction in Section 6;
+- owner top-up/renewal and post-year release;
+- DNS record set/delete operations;
+- `dnsresolve`; and
+- ownership transfer.
 
-Required getters include:
+TOS v1 preserves the upstream getters:
 
 ```text
 get_nft_data()
+get_editor()
 get_domain()
-get_domain_state()
 get_auction_info()
+get_last_fill_up_time()
 dnsresolve(slice remaining_name, int category)
 ```
 
-`get_domain_state()` returns at least the canonical label hash, owner, status,
-`expires_at`, grace end, registrar version, and record-set hash. This data must
-be sufficient for wallets, explorers, and independent indexers to reproduce
-the visible state.
+It does not add `get_domain_state`, `domain_epoch`, `auction_round`, a grace
+state, or a second settlement contract. Applications derive the renewal
+deadline from `get_last_fill_up_time() + one_year` and determine whether an
+auction is present through `get_auction_info()`.
 
-### 5.4 Subdomains
+The Domain Item is deployed once at its deterministic address. Initial
+registration initializes it and starts its first auction. After a year without
+renewal, `dns_balance_release` starts another auction in the same item. The
+item is never redeployed for a later owner.
 
-The owner of `alice.tos` can:
+### 5.4 Subdomains - preserve TEP-81 behavior
 
-- store records directly for `alice.tos`;
-- store records for bounded subdomain names in the domain item; or
-- place `dns_next_resolver` on a prefix and delegate the remaining namespace
-  to another resolver contract.
+The upstream Domain Item stores records for the domain itself. For a deeper
+query it always requests the `dns_next_resolver` category, consumes the leading
+NUL self separator, and returns the delegated resolver stored in that category.
+It does not embed a prefix dictionary for arbitrary subdomain records.
 
-Subdomains are not separate NFTs in v1. A delegated resolver may implement its
-own ownership policy, but clients must display that the parent owner can change
-or revoke the delegation. Tradable subdomain wrappers are deferred.
+Therefore the owner of `alice.tos` can:
 
-## 6. Ownership, Auction, Renewal, and Expiry
+- store records for `alice.tos`; and
+- store one `dns_next_resolver` record that delegates the namespace beneath
+  `alice.tos` to another TEP-81 resolver.
 
-### 6.1 Registration
+A separately deployed subresolver may implement records such as
+`translate.alice.tos`, but it is not a tradable subdomain NFT in v1. Clients
+must display that the parent owner can replace or remove the delegation.
 
-All generally available second-level names use a commit-reveal auction. This
-prevents an observer from copying a valuable plaintext registration from the
-mempool. A commitment is held by a small deterministic bid-vault contract,
-derived from the commitment and bidder, so the commit transaction does not
-expose the label and the collection does not become an unbounded deposit
-ledger. On reveal, the collection verifies the vault's StateInit/code hash and
-moves the revealed bid into the auction for the label.
+TOS must not modify the Domain Item to serve bounded subdomain records directly
+unless a later TIP demonstrates a need. Keeping the inherited eight-bit
+self-query behavior avoids a new consumed-bit contract and preserves existing
+Lite Client and Toslib recursion.
 
-The bid commitment is domain-separated and network-bound:
+### 5.5 Worked upstream-compatible resolution trace
 
-```text
-commitment_cell = begin_cell()
-  .store_uint(sha256("tos.dns.bid.v1"), 256)
-  .store_uint(network_domain_hash, 256)
-  .store_uint(label_hash, 256)
-  .store_msg_addr(bidder_address)
-  .store_coins(maximum_bid)
-  .store_uint(salt, 256)
-  .end_cell()
+`translate.alice.tos` encodes to `tos\0alice\0translate\0`, 20 bytes /
+160 bits. With the current upstream Root/Collection/Item behavior:
 
-commitment = commitment_cell.hash()
-```
+| Hop | Resolver and input | Consumed | Required result | Remainder |
+|---|---|---:|---|---|
+| 1 | Root: `tos\0alice\0translate\0` | 24 bits (`tos`, stopping before its separator) | `dns_next_resolver` to the `.tos` Collection | `\0alice\0translate\0` |
+| 2 | Collection: `\0alice\0translate\0` | 48 bits (leading NUL plus `alice`, stopping before its separator) | `dns_next_resolver` to the locally derived Domain Item | `\0translate\0` |
+| 3 | Domain Item: `\0translate\0` | 8 bits (self separator) | its stored `dns_next_resolver` | `translate\0` |
+| 4 | delegated subresolver: `translate\0` | implementation-defined positive component-boundary prefix, ultimately full input | requested terminal record or another valid `dns_next_resolver` | strictly shorter after every partial hop |
 
-The exact cell layout is frozen by the TIP and shared vectors; implementations
-must not hash ad hoc string concatenation. The auction has fixed commit,
-reveal, and settlement windows. The winner is the highest valid revealed bid
-and pays the second-highest valid bid plus the configured minimum increment,
-capped at the winner's bid. A tie is resolved by the earlier finalized
-commitment. Unrevealed commitments incur a bounded penalty; valid losing bids
-are refundable through owner-initiated withdrawals. Settlement never loops
-over bidders or synchronously pushes every refund.
+For `alice.tos`, hops 1 and 2 leave the one-byte slice `\0`; the Domain Item
+consumes 8 bits and returns its own requested record.
 
-Exact durations, minimum bids, increments, penalties, and the fee sink are
-economic parameters, not constants invented by this document. They must be
-approved and frozen before deployment. No auction proceeds may be described as
-validator rewards, burns, treasury revenue, or protocol revenue until the
-corresponding TOS economic policy explicitly defines that treatment.
+A conforming client preserves the inherited TEP-81 checks:
 
-### 6.2 Reserved names
+- the consumed count is byte-aligned, positive for a successful hop, and no
+  larger than the input;
+- a partial answer ends at a component boundary and decodes exactly as
+  `dns_next_resolver`;
+- the next resolver address is a valid `MsgAddressInt`;
+- every remainder is strictly shorter; and
+- malformed records or an absent next resolver fail closed.
 
-Before activation, governance publishes a finite, reviewable reservation list
-and commits its Merkle root in the collection configuration. It should contain
-only protocol-critical names, security-sensitive names, and names required for
-network operation. After activation, governance cannot expand the list for an
-already-open namespace without a separately announced contract upgrade.
+The production clients may additionally impose the uniform hop budget, cycle
+detection, and checkpoint rules in Section 8. Those are client hardening, not a
+reason to change the upstream contract ABI.
 
-### 6.3 Lease and renewal
+## 6. TON-Compatible Auction, Renewal, and Release
 
-A settled domain receives a one-year lease. The owner can renew during a
-bounded renewal window at the configured renewal price.
+### 6.1 Compatibility rule
 
-At `expires_at`:
+The `.tos` auction and lifecycle contract must track the current official TON
+DNS contract, rather than introduce a TOS-specific auction protocol. At the time
+of this design, `tosnetwork/dns-contract:main` and
+`ton-blockchain/dns-contract:main` point to the same commit,
+`d08131031fb659d2826cccc417ddd9b98476f814`. Before every DNS contract release,
+CI must fetch the current upstream branch, produce a source and generated-code
+parity report, and require an explicit review for every difference.
 
-- resolution stops immediately;
-- record changes and transfers stop; and
-- a 30-day recovery grace begins, during which only the recorded owner may
-  renew.
+The default is zero semantic difference. In particular, v1 does not add a
+commit-reveal phase, bid-vault contract, second-price settlement, auction-round
+counter, domain-epoch counter, or renewal grace period. A later TIP may propose
+one of these only as a separately versioned protocol with migration and
+compatibility evidence; it is not part of this design.
 
-After grace, the name becomes available for a new commit-reveal auction. The
-contract must treat an expired name as unresolved even if physical cleanup has
-not yet run. Garbage collection is therefore an optimization, not a security
-boundary.
+Allowed differences are limited to changes required to deploy the same protocol
+on TOS: the `.tos` suffix and presentation strings, TOS network addresses, the
+initial auction timestamp, approved TOS-denominated economic constants, build
+and deployment metadata, and integrations outside the contracts. Even these
+differences require byte-exact tests and must not silently alter the state
+machine.
+
+### 6.2 Initial registration
+
+Registration follows the upstream Collection contract:
+
+1. The bidder sends an ordinary internal message whose body is the plaintext
+   second-level label and whose value covers the minimum opening bid and gas.
+2. The Collection checks that the auction has launched, the label is byte
+   aligned, its length is greater than three and at most 126 bytes, and every
+   byte is lowercase ASCII `a`-`z`, `0`-`9`, or `-`. This is the inherited
+   contract rule; stricter UI rules in Section 4 are not a different auction.
+3. If ConfigParam 80 is present, the Collection applies the inherited blacklist
+   check. TOS must not make this optional upstream hook a new consensus
+   prerequisite merely to launch `.tos`.
+4. The Collection checks the inherited minimum-price curve, derives
+   `item_index = slice_hash(label)`, and deploys the deterministic Domain Item
+   with the sender as first bidder and the attached bid as the current maximum.
+
+The label is public before inclusion, exactly as it is in TON DNS. The auction
+is the price-discovery and anti-sniping mechanism; TOS does not claim that it
+hides registration intent from block producers or observers.
+
+### 6.3 Open ascending auction
+
+The auction state is held inside the Domain Item and retains the upstream
+rules:
+
+- the first-auction duration decreases from seven days to one hour in twelve
+  monthly steps after the configured launch timestamp, then remains one hour;
+- a replacement bid must be at least 105% of the current maximum bid;
+- an accepted bid immediately sends the previous maximum bid back to the
+  previous bidder using the upstream message behavior;
+- a bid accepted with less than one hour remaining extends the end time so that
+  at least one hour remains; and
+- the highest bidder wins and pays the full winning bid. This is not a
+  second-price auction.
+
+The exact integer rounding, balance reservation, send modes, bounce behavior,
+and duration calculation are defined by the pinned upstream FunC source and its
+tests, not by a reimplementation from this prose.
+
+### 6.4 Finalization
+
+Auction finalization is lazy. After `auction_end_time`, a later non-zero
+operation finalizes the auction before its requested owner operation is
+processed: the winning amount is sent to the Collection, the highest bidder is
+installed as owner, and the auction fields are cleared. There is no separate
+settlement contract and no loop over bidders.
+
+Clients must therefore distinguish “auction end time has passed” from “the
+finalization transaction has executed”. A registrar may offer a finish action,
+but it must invoke the inherited item behavior rather than invent a second
+settlement path.
+
+### 6.5 Renewal and release
+
+Ownership is kept alive by funding the Domain Item, using the inherited
+`last_fill_up_time` lifecycle:
+
+- an owner top-up refreshes `last_fill_up_time`;
+- a successful transfer or record update also refreshes it;
+- initial deployment sets it when the first auction starts, and auction
+  finalization preserves that value rather than resetting it to the win time;
+- `one_year` is the upstream constant `31,622,400` seconds (366 days); and
+- there is no grace period.
+
+Once `now() - last_fill_up_time > one_year` and no auction is active, anyone may
+invoke the inherited balance-release operation with at least the current
+minimum price. The item refunds its old releasable balance to the former owner,
+clears the owner, and immediately starts a new seven-day open auction with the
+caller as its first bidder. Re-auction uses the same permanent Domain Item
+address; the item is not redeployed.
+
+The upstream item retains its record dictionary, and its raw `dnsresolve`
+getter does not independently suppress records merely because the renewal time
+has elapsed or an auction is active. Consequently, wallets, gateways, Agent
+software, payment flows, and other security-sensitive consumers must inspect
+`get_auction_info()` and `get_last_fill_up_time()` and fail closed for an active
+auction or an overdue item. This is a required client safety policy, not a
+reason to fork the contract state machine. A later upstream fix should be
+evaluated and merged through the parity process in Section 6.1.
+
+### 6.6 Deployment parameters and upstream updates
+
+The inherited minimum-price curve and auction formulas stay unchanged unless
+TON upstream changes them. TOS must nevertheless replace the upstream hardcoded
+TON launch timestamp when starting a new `.tos` namespace; otherwise the
+twelve-month duration ramp has already elapsed. The chosen TOS launch timestamp
+and any TOS-denominated price constants require governance approval, published
+source diffs, reproducible code hashes, and test vectors at boundary times and
+amounts.
+
+Upstream synchronization is continuous, not a one-time port:
+
+1. monitor official `ton-blockchain/dns-contract` releases and commits;
+2. classify each upstream change as security, compatibility, economics, or
+   tooling;
+3. reproduce its upstream tests and add TOS-network deployment tests;
+4. merge semantic fixes by default unless a documented TOS constraint prevents
+   them; and
+5. publish the remaining diff and deployed code hashes before activation.
+
+ConfigParam 80 is more than a registration blacklist. The inherited Collection
+rejects a new label whose item index is present, and an existing Domain Item can
+process a matching governance decision to transfer or destroy itself. Tests,
+wallet warnings, TOSCan, and governance runbooks must cover both effects. TOS
+must not remove or broaden this path silently; any policy change is a reviewed
+contract diff and governance decision.
+
+No application repository may redefine bid thresholds, auction timing, renewal
+deadlines, or item-state interpretation. They consume the contract ABI and the
+shared conformance vectors.
 
 ## 7. Record Categories
 
-Categories remain `sha256(UTF-8 category name)` and category zero requests the
-complete record dictionary. Version 1 reuses existing TL-B record encodings;
-new semantics are selected by category instead of inventing unnecessary wire
-types.
+Categories remain `sha256(UTF-8 category name)`. Category zero is not a category
+at all: it requests the **complete record dictionary**, returned as
+`HashmapE 256 ^DNSRecord` (`crypto/block/block.tlb:980`), which the client walks
+itself (`lite-client.cpp:2014-2032`, `ManualDns.cpp:539-556`). Version 1 reuses
+the existing TL-B record encodings; new semantics are selected by category
+instead of inventing unnecessary wire types.
 
-| Category name | Record encoding | TOS meaning | Required follow-up verification |
-|---|---|---|---|
-| `wallet` | `dns_smc_address` | Default payment account | Address/network validation and wallet transaction confirmation |
-| `agent` | `dns_smc_address` | Finalized Agent account | Agent code/identity, live state, controller policy, and revocation |
-| `capability` | `dns_smc_address` | Finalized Capability account | Owner Agent, version, revocation/tombstone, manifest, and policy |
-| `messenger` | `dns_smc_address` | Agent used for Messaging contact | Finalized Agent plus current Endpoint delegation, Contact Descriptor, and DHT locator |
-| `site` | `dns_adnl_address` | TOS Site entry point | ADNL identity and protocol support |
-| `storage` | `dns_storage_address` | TOS Storage Bag ID | Bag hash/content verification and application policy |
-| `dns_next_resolver` | `dns_next_resolver` | Delegated subdomain resolver | Resolver address, cycle, depth, and response validation |
-| `text` | `dns_text` | Human-readable presentation metadata | Never authoritative; escape before display |
+The **Status** column distinguishes what is already fixed by TOS code from what
+this document proposes. Only two category hashes exist in the tree today (§3.1);
+every `Proposed` row is a name whose SHA-256 value the TIP must freeze together
+with a vector, because once a record is stored under a hash the name that
+produced it is unrecoverable.
+
+| Category name | Status | Record encoding | TOS meaning | Required follow-up verification |
+|---|---|---|---|---|
+| `dns_next_resolver` | **Pinned in code** (`ManualDns.h:34`, `dns-manual-code.fc:347`, `dns-auto-code.fc:480`) | `dns_next_resolver` | Delegated subdomain resolver | Resolver address, cycle, depth, response validation; valid **only** on partial resolution (§5.5) |
+| `site` | **Pinned in code** (`DNSResolver.cpp:69`) | `dns_adnl_address` | TOS Site entry point | ADNL identity and protocol support |
+| `wallet` | Proposed | `dns_smc_address` | Default payment account | Address/network validation and wallet transaction confirmation |
+| `agent` | Proposed | `dns_smc_address` | Finalized Agent account | Address→Agent ID re-derivation (below), live state, controller policy, revocation |
+| `capability` | Proposed | `dns_smc_address` | Finalized Capability account | Address→Capability ID re-derivation, owner Agent, version, revocation/tombstone, manifest, policy |
+| `messenger` | Proposed | `dns_smc_address` | Agent used for Messaging contact | Address→Agent ID re-derivation, then Endpoint delegation, Contact Descriptor, and DHT locator (§9.2) |
+| `storage` | Proposed | `dns_storage_address` | TOS Storage Bag ID | Bag hash/content verification and application policy |
+| `text` | Proposed | `dns_text` | Human-readable presentation metadata | Never authoritative; escape before display |
+
+**Name collisions with inherited conventions.** `dns_next_resolver` and `site`
+carry their inherited meanings unchanged and must not be redefined.
+`wallet`, `storage`, and `text` are inherited *conventions* that no TOS code
+implements yet, so TOS is free to define them but must not assume a TON-derived
+tool already agrees. `agent`, `capability`, and `messenger` are new to TOS and
+have no inherited meaning.
+
+**Strict category-to-record-type checking, failing closed.** A decoder must
+reject any record whose TL-B tag is not the one this table assigns to the
+requested category — a `dns_adnl_address` returned for `agent`, or a `dns_text`
+returned for `wallet`, is a hard failure, never a best-effort interpretation.
+Trailing data after a decoded record is likewise a failure. Under category zero
+the same rule applies per entry: an entry with an unknown category hash is
+ignored, but an entry whose record does not decode as a `DNSRecord` invalidates
+the answer. `EntryData::from_cellslice` already fails closed on an unknown tag
+(`ManualDns.cpp:131-195`), and every other implementation must match.
+
+### 7.1 Agent, Capability, and Messenger records
+
+`dns_smc_address` is safe for these three categories, because in the actual
+Native model both Agents and Capabilities **do** have dedicated deterministic
+account addresses: the address is derived from the `StateInit` holding the
+reviewed registry code cell and a data cell carrying the network, object kind,
+and object ID (`tos-service-spec/docs/NATIVE_IDENTIFIERS_V1.md`, "Deterministic
+account"; `tos-service-protocol/pkg/nativecore/locator.go:55-74`). No record
+semantics need to be invented.
+
+Two properties of that derivation drive mandatory follow-up checks:
+
+- **The durable identity is the object ID, not the address.** Agents are
+  `agent_<sha256 hex>` and Capabilities are `cap_<sha256 hex>`
+  (`NATIVE_IDENTIFIERS_V1.md`), and every Native and Messenger interface is
+  keyed by that ID — for example `resolver.ResolveAgent(delegation.AgentID)`
+  in `tos-messenger/pkg/identity/delegation.go:272`. A consumer must therefore
+  read the account at the resolved address, decode its typed state, recover the
+  object ID, and **re-derive the address from that ID**, accepting the record
+  only if the derivation reproduces it. Resolving a name to an address and
+  feeding that address onward is not sufficient.
+- **The address is registry-code-version specific.** Because the registry code
+  cell is inside the `StateInit`, a registry code upgrade changes the address of
+  every object. A `dns_smc_address` record written before such an upgrade points
+  at the old account. A consumer must check the code hash against the currently
+  accepted registry code and treat a mismatch as "record stale", not as
+  "Agent revoked" and not as a reason to trust the old account. The TIP must
+  state whether `.tos` records are expected to be rewritten on a registry
+  migration, or whether an ID-carrying record type is introduced in v2; v1 does
+  not answer this and must not pretend to.
 
 An `agent`, `capability`, or `messenger` record stores an account address, not
 an HTTPS URL or mutable private endpoint. A service name normally points to a
 Capability through the `capability` category. Multiple services should use
 separate subdomains rather than an unbounded list inside one record.
+
+Nothing mutable is duplicated into DNS. Contact Descriptors, prekey sets,
+Capability manifests, quote policy, rate cards, and service endpoints stay in
+their authoritative locations; DNS holds only the address that leads to them.
 
 Future typed record schemas require a TIP, new positive and adversarial
 vectors, and at least two independent decoders before being marked stable.
@@ -370,12 +814,32 @@ A conforming resolver performs these steps:
 3. encode the name in reverse zero-delimited form;
 4. call `dnsresolve` on the root at that same finalized block;
 5. validate the consumed-bit count and component boundary;
-6. if partially resolved, require a valid `dns_next_resolver`, detect cycles,
-   and continue with the unresolved suffix;
+6. if partially resolved, require a valid `dns_next_resolver`, detect cycles by
+   `(resolver_address, remaining_slice)`, and continue with the unresolved
+   suffix;
 7. stop after at most eight resolver hops;
 8. decode only the requested category and reject trailing or malformed data;
 9. confirm that the domain is active at the block time; and
 10. return both the value and its provenance.
+
+**Step 7 does not describe the current clients, and reconciling them is
+required work in the `tos` row of §11.** Today the hop budget is three
+different values and one absence:
+
+| Client | Hop budget | Evidence |
+|---|---|---|
+| `rldp-http-proxy` | 16 | `DNSResolver.cpp:70` passes `ttl = 16` |
+| `toslib-cli` | 10 | `toslib/toslib/toslib-cli.cpp:992` passes `ttl = 10` |
+| Toslib API callers | caller-supplied, unvalidated | `ToslibClient.cpp` decrements `ttl` per hop with no ceiling |
+| Lite Client | **none** | `dns_resolve_finish` recurses with no counter (`lite-client.cpp:1994`) |
+
+The Lite Client is not unbounded in the strict sense — each hop consumes at
+least one byte, so a chain terminates within 127 hops (§5.5) — but 127 remote
+get-method executions per lookup is a denial-of-service surface, and no client
+detects a cycle at all. `.tos` v1 fixes the budget at **eight hops** for every
+implementation, requires explicit cycle detection, and requires that exhausting
+the budget be reported as a distinct error rather than as "not found", so an
+operator can tell a misconfigured delegation from a missing name.
 
 The structured result exposed by SDKs and APIs must include:
 
@@ -387,20 +851,66 @@ root_resolver_address
 resolver_path[]
 masterchain_block_id / seqno / root hash
 domain_item_address
-domain_expires_at
+auction_active, max_bidder, max_bid, auction_end_time
+last_fill_up_time and derived renewal_deadline
 resolved_at_chain_time
+provenance_class            (see the table below)
 ```
+
+No component returns this structure today. Producing it is new node and SDK
+work, tracked in the `tos` and `tos-service-protocol` rows of §11, and this
+document does not describe it as available.
 
 Clients resolving Agent-native objects then perform their protocol-specific
 finalized-state verification. They must use the account address or object ID,
 not the input name, in signatures, nonces, Accepted Quotes, Events, receipts,
 and durable journals.
 
-### 8.1 Caching
+### 8.1 What each reader can actually prove
+
+Four different assurances are routinely conflated. They are not interchangeable,
+and a structured result must name which one it carries:
+
+| `provenance_class` | What it means | Who provides it today |
+|---|---|---|
+| `evaluated` | A get-method was executed against a named block. Says nothing about whether that block's state is genuine. | any `runGetMethod` caller that ignores the returned proof |
+| `state_proved` | The account state was verified by Merkle proof against the named block, and the get-method was re-executed locally over the proved state. | **Lite Client** and **Toslib** |
+| `chain_anchored` | `state_proved`, plus the named block was reached through a verified block-proof chain from a trusted init block. | **Toslib** |
+| `quorum_agreed` | A strict majority of independent RPC endpoints returned the same value. No cryptographic proof. | **`tos-service-protocol`**, **Gateway** |
+
+The distinctions are verifiable in the tree:
+
+- The Lite Client calls `block::AccountState::validate(ref_blk, addr)` before
+  running the method (`lite-client.cpp:2233`), which performs
+  `check_shard_proof` and `check_account_proof`
+  (`crypto/block/check-proof.cpp:224-237`), and then re-executes `dnsresolve`
+  in a local VM over the proved state (`lite-client.cpp:2319-2327`). That is a real
+  Merkle proof.
+- Toslib does the same (`ToslibClient.cpp:1501`) and additionally maintains a
+  verified `BlockProofChain` from its init block (`toslib/toslib/LastBlock.cpp`),
+  which is what raises it to `chain_anchored`.
+- `tos-service-protocol/pkg/toschain` reads over JSON-RPC and agrees by strict
+  endpoint majority (`pkg/toschain/quorum.go`, `adapter.go:56`). The word
+  `proof` does not occur in the package. It is honest agreement among readers;
+  it is **not** a proof, and this document must never describe it as one.
+- The Gateway is a transport. It can forward and cache a `quorum_agreed`
+  result; it cannot raise its class.
+
+**Anchoring across hops.** All hops of one lookup must be evaluated against one
+masterchain checkpoint and the shard states it commits to. The Lite Client
+already threads a single `blkid` through every recursion
+(`lite-client.cpp:1994`). Toslib is weaker: the first hop uses the client's
+current query context and each later hop is pinned to the block returned by the
+previous hop (`ToslibClient.cpp:5468`, `:5501`), so a lookup can straddle two
+checkpoints. `.tos` v1 requires a single pinned checkpoint for the whole chain,
+reported in the structured result; the Toslib change belongs to the `tos` row of
+§11.
+
+### 8.2 Caching
 
 Positive cache lifetime is bounded by the earliest of:
 
-- domain expiry;
+- the derived renewal deadline and auction state;
 - a record-specific validity limit, if a future record defines one;
 - the current finalized-state refresh policy; and
 - a conservative client maximum.
@@ -409,7 +919,28 @@ Negative results use a short bounded cache. A reorg or a change in the trusted
 finalized checkpoint invalidates affected cache entries. Gateways may cache
 resolution results but never become the source of authority.
 
-### 8.2 Reverse lookup
+Invalidation must be driven by events, not only by elapsed time. Each of these
+invalidates every entry derived from the affected subtree:
+
+| Event | Invalidates |
+|---|---|
+| auction starts, ends, or is finalized | that name and all its subdomains |
+| `last_fill_up_time` changes or the renewal deadline passes | that name and all its subdomains |
+| record set or delegation mutated | that name and, for a delegation change, its subtree |
+| parameter 4 or a root delegation changed | the entire cache |
+| trusted finalized checkpoint moved backwards (reorg) | every entry resolved at or after the abandoned checkpoint |
+
+**The one cache that exists today satisfies none of this.**
+`rldp-http-proxy/DNSResolver` keys a `std::map` by host string with a flat
+300-second hard and 270-second soft timeout (`DNSResolver.cpp:31-32, 55-67`).
+It never consults auction or `last_fill_up_time` state, never learns of a record update, never reacts to
+a checkpoint change, is never bounded in size, and never evicts — an attacker
+who can drive lookups grows it without limit. Bringing it in line with this
+section, and gating `.tos` acceptance in the proxy on the finalized-root,
+hop-limit, cycle, lifecycle, and record-validation rules of §5.5 and §8, is
+required work in the `tos` row of §11.
+
+### 8.3 Reverse lookup
 
 Reverse lookup is an indexer projection, not a consensus mapping. An explorer
 or wallet may show a primary name for an address only after forward-confirming
@@ -438,50 +969,79 @@ The Messenger resolution chain is:
 
 ```text
 chat.alice.tos
-  -> `messenger` Agent account
+  -> `messenger` record -> Agent account address
+  -> decode finalized typed state -> agent_<sha256 hex>
+  -> re-derive the account address from that ID and require a match   (§7.1)
   -> finalized Agent policy and delegation digest
   -> signed, expiring DHT locator
   -> content-addressed Contact Descriptor
   -> current Messaging Endpoint and prekey generation
 ```
 
+The third and fourth lines are the step that must not be skipped. Messenger's
+delegation verifier is keyed by Agent ID, not by address —
+`identity.Delegation.AgentID` is checked against `AgentPattern` and resolved via
+`resolver.ResolveAgent(delegation.AgentID)`
+(`tos-messenger/pkg/identity/delegation.go:272, 357`) — so a name resolution
+that stops at an address has not yet produced anything Messenger can consume.
+Recovering the ID from state and re-deriving the address is what prevents a
+record from pointing at an account that merely *looks* like a registry object.
+
 DNS must not contain prekeys, private contact graphs, Mailbox bearer tokens, or
-long-lived endpoint URLs. A Messenger Event is signed and journaled against
-the resolved Agent and Endpoint identities, never against the string
-`chat.alice.tos`.
+long-lived endpoint URLs. In particular the signed Contact Card already carries
+exactly one endpoint plus a bounded expiry
+(`tos-service-protocol/pkg/agentpacket/contact.go:20-48`); DNS must not
+duplicate that field, because a stale DNS copy would outlive the signature's
+expiry. A Messenger Event is signed and journaled against the resolved Agent and
+Endpoint identities, never against the string `chat.alice.tos`.
 
 ### 9.3 TOS Sites and Storage
 
 Existing `site` and `storage` categories remain compatible with the current
 TL-B records. `rldp-http-proxy` should accept `.tos` only after it implements
-the finalized-root, hop-limit, cycle, expiry, and record-validation rules in
+the finalized-root, hop-limit, cycle, lifecycle, and record-validation rules in
 this document.
 
 ## 10. Security Requirements
 
 Implementations must address at least these threats:
 
-- **front-running:** commit-reveal hides the label and bid until reveal;
-- **homographs:** v1 is lowercase ASCII only and reserves `xn--`;
-- **network confusion:** commitments, caches, and UI confirmations are bound
+- **observable bidding and front-running:** registration labels and bids are
+  public, as in TON DNS; clients must show the current bid, minimum increment,
+  and end time and must never promise sealed-bid confidentiality;
+- **homographs:** the contract is lowercase ASCII but permits `xn--` and edge
+  hyphens; public UIs apply and clearly label the stricter policy in §4.1;
+- **network confusion:** caches and UI confirmations are bound
   to the network domain tuple;
 - **malicious resolvers:** strict consumed-bit, component-boundary, schema,
   hop-limit, and cycle checks;
 - **stale authority:** Agent, Capability, and Messaging state is re-read from a
   finalized checkpoint after DNS resolution;
-- **expired records:** contracts fail closed at `expires_at`, independent of
-  garbage collection;
+- **overdue or auctioning records:** because the upstream raw getter can retain
+  records, security-sensitive clients derive lifecycle state from
+  `get_auction_info()` and `get_last_fill_up_time()` and fail closed (§6.5);
 - **record substitution:** mutations require the current NFT owner and are
   reflected in finalized state;
-- **admin seizure:** no ordinary administrator transfer path exists;
-- **upgrade substitution:** root, collection, and item code hashes are pinned,
-  versioned, and announced before activation;
+- **governance seizure:** ConfigParam 80 can block registration and authorize
+  an inherited transfer/destruction operation for an existing item; clients
+  disclose this power and governance limits it under the published policy;
+- **upgrade substitution:** *required policy, not a required consensus
+  feature.* TOS has no DNS-specific code-hash registry (§3.1), and it does not
+  need to generalize the AIPoW-specific ConfigParam 93 merely to ship DNS.
+  Before activation the TIP and `dns-contract` release manifest must pin and
+  version the reproducible code hashes for the root, collection, and item and
+  define client acceptance rules. Because item code participates in StateInit,
+  a code change requires a new Collection and an explicit migration plan. An
+  on-chain allowlist is one governance option, not assumed by this document;
+  immutable code/data, an authenticated collection policy, or client release
+  manifests may satisfy the same threat model if the TIP states their trust and
+  upgrade properties explicitly;
 - **gateway deception:** clients can reproduce resolution from chain state and
   receive provenance with cached API results;
 - **display injection:** text records are untrusted UTF-8 presentation data;
   and
 - **payment mistakes:** wallets show the resolved raw address, network,
-  checkpoint age, and domain expiry before signing.
+  checkpoint age, auction state, and derived renewal deadline before signing.
 
 Names must never be used directly as cryptographic principals, database keys
 for irreversible actions, or signature-domain inputs. Durable systems store
@@ -496,23 +1056,33 @@ map; implementing only the smart contracts is not a complete `.tos` product.
 | Repository | Required coding work | Acceptance evidence |
 |---|---|---|
 | `tosnetwork/TIP` | Publish the normative TOS DNS interface, category registry, lifecycle, operation codes, and canonical vectors | Accepted TIP with frozen hashes and compatibility rules |
-| `tosnetwork/tos` | Implement audited root, `.tos` collection, domain NFT, bid-vault, commit-reveal auction, renewal/expiry, and subresolver contracts; pin TL-B/category constants; activate config parameter 4; harden Lite Client, Toslib, `rldp-http-proxy`, JSON-RPC, genesis tooling, and emulator tests | Deterministic builds; contract/unit/adversarial tests; local multi-validator resolution and auction evidence; code hashes and activation plan |
-| `tosnetwork/tos` (`tosctl`) | Add `domain normalize`, `commit`, `reveal`, `settle`, `renew`, `transfer`, `record set/delete`, `delegate`, `resolve`, and `inspect` commands with offline signing support | CLI golden vectors, restart-safe transaction tracking, hardware/offline signer tests, and real localnet lifecycle |
+| `tosnetwork/dns-contract` (**established; forked from `ton-blockchain/dns-contract`**) | Track the latest official Root, Collection, Domain Item, auction/renewal logic, and tests. Make only reviewed deployment adaptations for `.tos`, TOS addresses, launch time, and approved TOS-denominated constants; continuously report the remaining upstream diff | Upstream-parity CI; deterministic builds and published code hashes; exact 105% bid, one-hour extension, refund, lazy-finalization, and 366-day release tests; local multi-validator lifecycle evidence |
+| `tosnetwork/tos` (confirmed generic fixes) | Fix independently reproducible inherited defects: set `get_default_max_name_size()` to 126 (`ManualDns.h:193`); correct the `min(qdomain.size(), 126)` consumed-bit cap (`lite-client.cpp:1958`); make `getTokenData` `uint256`-safe for hashed indices (`json-rpc-server-token.cpp:318, 368`). These are generic correctness fixes, not evidence that `.tos` requires a consensus fork | Boundary vectors from §4.2 passing in C++; a JSON-RPC test asserting a full 256-bit index round-trips as a decimal string; no consensus-state change |
+| `tosnetwork/tos` (production-profile client hardening) | For production clients, add a uniform eight-hop limit and cycle detection to Lite Client, Toslib, `toslib-cli`, and `rldp-http-proxy` (§8); pin every hop to one checkpoint (`ToslibClient.cpp:5468`); bound the proxy cache and make it auction/renewal-aware (§8.2); emit the structured provenance result of §8 | Each change has an independent test and can land without the DNS contracts; hop/cycle, lifecycle cache invalidation, and checkpoint consistency evidence |
+| `tosnetwork/tos` (configuration and activation) | First prove whether existing generic genesis and Config Contract proposal tooling can set parameter 4. Add only the missing `config.dns_root!` helper, proposal wrapper, and localnet scripts demonstrated necessary by that exercise. Treat adding parameter 4 to `critical_params` as an explicit mainnet governance decision, not a prerequisite for the baseline port | A localnet booted with parameter 4 set from genesis and, if governance activation is selected, one where parameter 4 is introduced by proposal; evidence that clients fail closed while it is absent; a recorded decision on critical-parameter policy |
+| `tosnetwork/tos` (`sdk/js`) | TypeScript resolver, canonicalization, category hashes, item-address derivation, and `uint256` index handling; align `NftCollection.ts` with the TOS-TEP-62 DNS profile | Consumption of the shared vectors in TypeScript; parity with the Go and C++ implementations |
+| `tosnetwork/tos` (`tosctl`) | Add `domain normalize`, `bid`, `auction`, `finish`, `renew/top-up`, `release`, `transfer`, `record set/delete`, `delegate`, `resolve`, and `inspect`, using the inherited message formats with offline signing support | CLI golden vectors, exact bid-boundary and lifecycle interpretation tests, restart-safe transaction tracking, hardware/offline signer tests, and real localnet lifecycle |
 | `tosnetwork/tos-service-spec` | Specify how `.tos` aliases may identify Agent, Capability, and Messenger entry points without changing `tos_service_v1` authority | Normative boundary text, negative cases, and shared vectors; no alternate registry semantics |
-| `tosnetwork/tos-service-protocol` | Add a Go resolver/verifier library that consumes finalized TOS state, reproduces canonical encoding and category hashes, returns provenance, and resolves aliases to Native object IDs before existing verification | Cross-language vector parity, strict-majority finalized reads, cycle/expiry/reorg tests, and API compatibility |
-| `tosnetwork/tos-service-gateway` | Expose bounded read-only resolution and verified aliases in discovery results; cache only with checkpoint and expiry bounds | Gateway restart/cache tests and proof that a Gateway cannot create or mutate name or Native authority |
-| `tosnetwork/tos-messenger` | Accept `.tos` contact input, resolve `messenger` to an Agent, then execute the existing finalized delegation -> DHT locator -> Contact Descriptor checks; persist IDs rather than names | Substitution, stale delegation, name transfer, expiry, DHT rotation, and three-transport replay tests |
+| `tosnetwork/tos-service-protocol` | Add a Go resolver/verifier library that consumes finalized TOS state, reproduces canonical encoding and category hashes, returns provenance, checks auction/renewal state, and resolves an alias to an address and then to a Native object ID with the §7.1 re-derivation before existing verification; extend `api/tos/service/v1/native.proto` and regenerate `gen/` for any resolution response crossing the Connect boundary | Cross-language vector parity; results labelled `quorum_agreed`, never `proof`; cycle/lifecycle/reorg tests; generated-code and API-compatibility checks |
+| `tosnetwork/tos-service-gateway` | Expose bounded read-only resolution and verified aliases in discovery results; cache only within checkpoint and auction/renewal bounds | Gateway restart/cache tests and proof that a Gateway cannot create or mutate name or Native authority |
+| `tosnetwork/tos-messenger` | Accept `.tos` contact input, reject auctioning or overdue items, resolve `messenger` to an Agent, then execute the existing finalized delegation -> DHT locator -> Contact Descriptor checks; persist IDs rather than names | Substitution, stale delegation, name transfer, re-auction/overdue state, DHT rotation, and three-transport replay tests |
 | `tosnetwork/openfox` | Add name input/display at the human boundary while binding sessions, policy, purchases, and execution to resolved Agent/Capability IDs | Name-transfer and stale-cache tests proving no session or purchase authority follows an old alias |
-| `tosnetwork/toscan` | Index domain NFTs, auctions, renewals, records, transfers, and expiries; provide forward-confirmed reverse lookup and domain pages | Reorg-safe index tests, raw-address display, checkpoint provenance, and localnet lifecycle coverage |
-| `tosnetwork/ios` | Resolve names for send/contact flows and manage domain NFTs with explicit address/network/expiry confirmation | Unit, UI, signer, and testnet lifecycle tests |
+| `tosnetwork/toscan` | Index domain NFTs, auctions, top-ups, records, transfers, releases, and re-auctions; provide forward-confirmed reverse lookup and domain pages | Reorg-safe index tests, raw-address display, checkpoint provenance, and localnet lifecycle coverage |
+| `tosnetwork/ios` | Resolve names for send/contact flows and manage domain NFTs with explicit address/network/auction/renewal confirmation | Unit, UI, signer, and testnet lifecycle tests |
 | `tosnetwork/android` | Match the iOS resolver, send protection, and domain-management behavior without trusting inherited TON APIs | Cross-platform vectors, UI tests, and TOS-native API boundary tests |
-| new `tosnetwork/tos-domains` | Provide the public registrar and management web application; use wallet signing and chain APIs without holding owner keys | Commit/reveal recovery UX, transaction-state recovery, phishing defenses, CSP/security review, and testnet acceptance |
-| `tosnetwork/doc` | Maintain this architecture, operator runbooks, category registry links, deployment addresses, code hashes, and user documentation | Documentation review tied to released commits and deployed network parameters |
+| `tosnetwork/tos-domains` (**established; currently empty**) | Provide the public registrar and management web application; use wallet signing and chain APIs without holding owner keys, and consume the upstream-compatible ABI and shared vectors rather than redefining auction rules in the frontend | Public bid/refund/finalization recovery UX, transaction-state recovery, overdue-name warnings, phishing defenses, CSP/security review, shared-vector parity, and testnet acceptance |
+| `tosnetwork/toscan` (lifecycle indexing) | Keep ownership and record history by Domain Item address plus transaction logical time, and expose active auction, last top-up, derived renewal deadline, release, and re-auction transitions | An index test that owns a name, lets it become releasable, re-auctions it to a different owner at the same address, and keeps historical and current rows separate |
+| shared vector corpus (owned by `tosnetwork/TIP`, consumed everywhere) | Publish one versioned corpus covering §4.2 boundaries, category hashes, `slice_hash` item-index and item-address derivation, bid thresholds, auction durations, renewal deadlines, and the adversarial cases of §13 | The corpus is consumed unmodified by C++, Go, Swift, Kotlin, and TypeScript, and a corpus change fails every consumer build until re-reviewed |
+| `tosnetwork/doc` | Maintain this architecture, operator runbooks, category registry links, deployment addresses, and code hashes | Documentation review tied to released commits and deployed network parameters |
+| `tosnetwork/docs` | Publish end-user and integrator documentation for `.tos`, including public-auction behavior, renewal/release, wallet confirmation, and raw-address/network/lifecycle warnings | Published pages tied to a released commit; no page describes an unshipped capability as available |
 
 ### 11.1 Repositories that should not gain authority
 
-- `tos-ai` may accept already resolved Agent/Capability identities but should
-  not perform name-based execution authorization inside the runner.
+- `tos-ai` may accept already resolved Agent/Capability identities but must not
+  perform name-based execution authorization inside the runner. Execution stays
+  bound to the Accepted Quote and the object IDs it names; a `.tos` string must
+  never reach an authorization decision, a sandbox policy, or an evidence
+  record.
 - `freecity` may display verified aliases but remains a replaceable projection.
 - `tos-homepage` may link to the registrar only after deployment; it must not
   host registrar keys or claim unshipped functionality.
@@ -521,71 +1091,114 @@ map; implementing only the smart contracts is not a complete `.tos` product.
 
 ## 12. Delivery Plan
 
-### Phase 0 — specification freeze
+### Phase 0 — upstream parity and specification freeze
 
-1. Publish the TIP and category registry.
-2. Freeze normalization, internal encoding, category hashes, operation codes,
-   commitment bytes, deterministic addresses, and positive/adversarial vectors.
-3. Decide auction parameters, renewal pricing, fee sink, reservation root, and
-   upgrade governance.
-4. Complete contract threat modeling and independent review.
+1. Configure `dns-contract` with the official TON repository as upstream and
+   add CI that reports commit, source, generated-code, and ABI differences.
+2. Prove parameter-4 activation through existing generic TOS tooling before
+   adding specialized Core helpers.
+3. Publish the TIP, category registry, exact inherited auction/lifecycle rules,
+   and the small allowlist of TOS deployment differences.
+4. Freeze normalization, encoding, category hashes, `slice_hash` item index,
+   StateInit, operation codes, bid/duration boundary vectors, and code hashes.
+5. Approve the `.tos` launch timestamp, TOS-denominated price constants,
+   proceeds handling, optional reservation policy, and upgrade governance.
+6. Complete threat modeling and independent contract review.
 
-### Phase 1 — chain and local tooling
+### Phase 1 — contracts and local tooling
 
-1. Implement root, collection, bid-vault, domain item, and delegated resolver
-   contracts.
-2. Add emulator and property tests for complete lifecycle and malformed cells.
+1. Deploy the minimally adapted Root, Collection, and permanent Domain Item;
+   do not add an auction helper or Bid Vault contract.
+2. Reproduce upstream tests, then add TOS tests for every approved diff and for
+   client-side overdue/auction fail-closed behavior.
 3. Add `tosctl`, Lite Client, Toslib, JSON-RPC, and genesis/config support.
-4. Demonstrate register -> resolve -> update -> delegate -> transfer -> expire
-   -> grace renew -> re-auction on a multi-validator local network.
+4. Demonstrate register → outbid/refund → extend → finish → resolve → update →
+   delegate → transfer → top-up → release → re-auction on a multi-validator
+   local network.
 
 ### Phase 2 — testnet product
 
-1. Activate the audited root through configuration parameter 4.
+1. Activate the reviewed root through configuration parameter 4.
 2. Deploy `tos-domains`, TOSCan indexing, and wallet integrations.
 3. Run public testnet auctions with no mainnet ownership promise.
-4. Measure gas, state growth, resolver latency, reorg behavior, abandoned bid
-   cleanup, and support burden.
+4. Measure gas, state growth, resolver latency, reorg behavior, refund failures,
+   lazy finalization, release behavior, and support burden.
 
 ### Phase 3 — Agent-native integration
 
 1. Add service-protocol and Gateway alias resolution.
 2. Add Messenger and OpenFox contact resolution.
-3. Prove that name transfer, expiry, stale caches, revoked delegations, and
-   tombstoned Capabilities all fail closed.
+3. Prove that name transfer, overdue state, active re-auction, stale caches,
+   revoked delegations, and tombstoned Capabilities all fail closed.
 4. Consume the same vectors in C++, Go, Swift, Kotlin, and TypeScript.
 
-### Phase 4 — mainnet activation
+### Phase 4 — mainnet activation gates
 
-Mainnet activation requires:
+Every gate must be evidenced against a specific commit:
 
-- published source and reproducible contract code hashes;
-- at least two independent security reviews of registrar and item contracts;
-- a second independent resolver implementation;
-- wallet and explorer support for raw-address confirmation;
-- a frozen reservation root and economic parameters;
-- upgrade and incident runbooks;
-- testnet lifecycle evidence covering expiry and re-auction; and
-- an announced configuration-parameter-4 activation block.
+- **G1 — upstream parity:** the deployed contract release identifies its TON
+  upstream commit, and every semantic diff is approved and published.
+- **G2 — deterministic artifacts:** Root, Collection, and Item build
+  reproducibly to published code hashes on two independent builders.
+- **G3 — frozen formats:** the TIP and shared corpus freeze encoding, category
+  hashes, `slice_hash` item index, StateInit, ABI, operation codes, exact 105%
+  boundary rounding, durations, extension, refund, and release behavior.
+- **G4 — economics:** the launch timestamp, price curve/constants, proceeds
+  destination and accounting, and optional blacklist/reservation policy are
+  approved. No alternate auction model is hidden in economics configuration.
+- **G5 — implementation review:** two independent reviews cover the registrar
+  and item, and an independent resolver reproduces the shared vectors.
+- **G6 — lifecycle evidence:** a public testnet demonstrates registration,
+  multiple outbids and refunds, anti-sniping extension, lazy finalization,
+  transfer, record update, top-up, 366-day release, and re-auction to a different
+  owner at the same item address. Accelerated test-only times are permitted.
+- **G7 — client safety:** every security-sensitive client rejects raw DNS
+  records while an auction is active or renewal is overdue, and displays the
+  raw address, network, checkpoint age, auction state, and renewal deadline.
+- **G8 — reorg and cache behavior:** resolvers and indexers roll back abandoned
+  checkpoints and invalidate affected name, lifecycle, and delegation caches.
+- **G9 — governance and operations:** parameter 4 and ConfigParam 80 policy,
+  upgrade notice, incident response, and public contact path are active.
+- **G10 — upstream monitoring:** an owner and response SLA are assigned for new
+  official TON DNS changes, including expedited handling of security fixes.
 
 ## 13. Required Test Matrix
 
-At minimum, the shared corpus covers:
+At minimum, the shared corpus and integration suite cover:
 
-- valid and invalid labels, maximum lengths, case folding, and reserved `xn--`;
-- internal reverse encoding and every standard category hash;
-- deterministic collection/item addresses across mainnet and testnet;
-- commit copying, salt substitution, bid substitution, non-reveal, ties, refund
-  replay, and settlement replay;
+- valid and invalid labels, maximum lengths, case handling, reserved `xn--`,
+  and the complete Section 4.2 boundary table;
+- reverse encoding, category hashes, `slice_hash(label)`, deterministic
+  Collection/Item addresses, and the negative case that plain byte SHA-256 is
+  not substituted for TVM slice hashing;
+- minimum opening price and decay boundaries, initial-duration boundaries,
+  exact 105% minimum-bid rounding, rejection one unit below the threshold,
+  highest-bidder replacement, and refund destination/value;
+- bids outside the auction window, a bid inside the last hour extending the
+  auction to at least one hour, and multiple extensions;
+- lazy finalization after the end time, full winning-bid transfer to the
+  Collection, owner assignment, cleared auction state, and no bidder loop;
+- owner top-up, transfer, and record update refreshing `last_fill_up_time`;
+  rejection at the 366-day boundary and permission only after `>` one year;
+- balance release refunding the former owner, clearing ownership, opening a
+  seven-day auction with the caller as first bidder, and retaining the same
+  Domain Item address;
+- raw-record retention across overdue/re-auction state, together with every
+  wallet, Gateway, Messenger, Agent, payment, and Site client failing closed on
+  lifecycle checks;
 - record update/delete, NFT transfer, delegated subdomains, partial resolution,
-  resolver loops, excess depth, malformed consumed-bit counts, and trailing data;
-- expiry, grace renewal, cleanup delay, and re-auction;
-- finalized checkpoint change and indexer rollback;
-- Agent revocation, Capability tombstone/transfer, Messaging delegation
-  rotation/revocation, and stale DHT locator;
-- malicious Gateway cache responses and independently reproduced resolution;
-  and
-- wallet confirmation of raw address, network, and expiry.
+  resolver loops, excess depth, malformed consumed counts, category/type
+  mismatches, unknown TL-B tags, and trailing data;
+- the Section 5.5 hop trace byte for byte and hop exhaustion distinct from “not
+  found”;
+- finalized checkpoint change, cache invalidation, indexer rollback, and
+  historical ownership separation by transaction logical time;
+- correct provenance class, with `quorum_agreed` never presented as proof;
+- Agent revocation, Capability tombstone/transfer, address-to-object-ID
+  re-derivation mismatch, registry-code-version staleness, Messenger delegation
+  rotation/revocation, and stale DHT locators; and
+- wallet confirmation of raw address, network, auction state, renewal deadline,
+  and finalized checkpoint.
 
 ## 14. Operational Inspection
 
@@ -599,13 +1212,29 @@ cd build
 
 ```text
 getconfig 4
-dnsresolve <domain> <category>
-dnsresolve <domain> -1
+dnsresolve <domain>                          # category 0 -> all records
+dnsresolve <domain> dns_next_resolver        # follow the delegation chain
+dnsresolve <domain> site                     # a specific category
+dnsresolvestep <addr> <domain> <category>    # one hop against one resolver
 ```
 
-Category `-1` in the Lite Client is a diagnostic convention for resolver
-chaining; protocol categories are unsigned 256-bit hashes, with category zero
-meaning all records.
+**The Lite Client hashes the category argument.** `<category>` is passed through
+`td::sha256_bits256(cat_str)`, and an omitted argument means the all-zero
+category (`lite-client.cpp:1028-1030`). There is therefore no `-1` category:
+typing `dnsresolve <domain> -1` silently queries `sha256("-1")`, a category no
+contract will ever hold, and reports nothing found. Earlier revisions of this
+document described `-1` as a diagnostic convention for resolver chaining; that
+was wrong. The next-resolver category is the hash of the literal string
+`dns_next_resolver`, which is what the inherited contracts write
+(`dns-manual-code.fc:347`). The historical signed `-1` and `1`/`2` category
+numbers survive only as comments in `crypto/block/block.tlb:989-998`; the
+implementation is unsigned 256-bit hashes, with category zero meaning all
+records.
+
+`dnsresolvestep` differs from `dnsresolve` in two ways that matter when reading
+its output: it does not recurse, and it prepends a NUL to the encoded name
+(`mode = 3`, `lite-client.cpp:1826, 1988`), i.e. it asks the named resolver
+about the name *relative to itself* (§4.2).
 
 Operators must resolve against a recent finalized configuration, inspect the
 resolver path, and verify the final record type. A successful DNS lookup alone
