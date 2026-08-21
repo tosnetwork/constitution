@@ -58,6 +58,35 @@ block. When the parameter is absent both fees are treated as zero. These are the
 block-production fees only; they do not define the native TOS supply and are separate
 from any future service-actor pricing rules.
 
+## ConfigParam 4 (dns_root_addr)
+
+`dns_root_addr:bits256` — the masterchain account id of the `.tos` DNS root
+resolver. Clients hard-code the masterchain: the value is an account id, not a
+full address, and resolution always starts at `-1:<dns_root_addr>`.
+
+The parameter is **unset by default** and every DNS client fails closed while
+it is absent: lite-client reports that it cannot obtain the root from
+parameter 4, and toslib refuses root-based resolution. It is an ordinary
+(non-critical) parameter unless governance adds it to `critical_params`
+(ConfigParam 10) — a deliberate mainnet decision, not a default.
+
+Setting it:
+
+- **Genesis**: `config.dns_root_smc!` in `crypto/fift/lib/Config.fif` (a
+  commented example sits in `crypto/smartcont/gen-zerostate.fif`). Local test
+  networks pin it through `NetworkConfig.dns_root_addr` in the tostester
+  zerostate generator.
+- **Post-genesis**: an ordinary config-change proposal through the
+  configuration contract.
+- The pinned value may be the **counterfactual** address of a root deployed
+  later; clients keep failing closed until the account actually exists.
+  `scripts/dns-e2e.py` demonstrates the full flow (pin at genesis, deploy at
+  runtime, resolve).
+
+The root contract itself is immutable (no owner, no upgrade path), so
+repointing the `.tos` zone means deploying a new root and changing this
+parameter — see [DNS.md](DNS.md) §6.6 and §10 for the governance rules.
+
 ## ConfigParams 90–93 (AIPoW native issuance)
 
 These four parameters carry the Phase C AIPoW native-issuance configuration. They are

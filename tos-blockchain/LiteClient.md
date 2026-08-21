@@ -43,8 +43,17 @@ Typical tasks:
 last
 getconfig 8
 getconfig 4
-dnsresolve <domain> 1
+dnsresolve alice.tos
+dnsresolve alice.tos wallet
 ```
+
+`dnsresolve` starts at the root named by ConfigParam 4, walks up to eight
+resolver hops against one pinned finalized block, and prints the record
+together with its provenance: the pinned block, the hop count, and the full
+resolver path. The optional category argument is a **string** hashed with
+sha256 (`wallet`, `site`, `dns_next_resolver`, …); omitting it requests all
+categories. There is no numeric category: `dnsresolve <domain> 1` queries
+`sha256("1")`, a category no contract holds.
 
 Use the lite client for read-only operational inspection first. Reach for validator console only when you need node control operations.
 

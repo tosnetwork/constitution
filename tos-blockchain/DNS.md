@@ -121,10 +121,13 @@ review.
 The following statements were verified against the working tree and must not be
 assumed away by an implementer:
 
-- **Configuration parameter 4 is unset at genesis.**
-  `tos/crypto/smartcont/gen-zerostate.fif` never writes parameter 4, and
-  `crypto/fift/lib/` has no `config.dns_root!` helper. On a network built from
-  the current zero state, `block::Config::get_dns_root_addr()`
+- **Configuration parameter 4 is unset at genesis by default.**
+  `crypto/fift/lib/Config.fif` now provides `config.dns_root_smc!` and
+  `tos/crypto/smartcont/gen-zerostate.fif` carries a commented activation
+  example, but no genesis profile enables it; local test networks may pin it
+  through the tostester zerostate generator (`NetworkConfig.dns_root_addr`,
+  exercised by `scripts/dns-e2e.py`). On a network built from the default
+  zero state, `block::Config::get_dns_root_addr()`
   (`crypto/block/mc-config.cpp:869`) returns
   `configuration parameter 4 ... is absent` and every client-side resolution
   fails closed. A governance action is required on an existing network. Whether
@@ -1027,24 +1030,16 @@ A conforming resolver performs these steps:
 9. confirm that the domain is active at the block time; and
 10. return both the value and its provenance.
 
-**Step 7 does not describe the current clients, and reconciling them is
-required work in the `tos` row of §11.** Today the hop budget is three
-different values and one absence:
-
-| Client | Hop budget | Evidence |
-|---|---|---|
-| `rldp-http-proxy` | 16 | `DNSResolver.cpp:70` passes `ttl = 16` |
-| `toslib-cli` | 10 | `toslib/toslib/toslib-cli.cpp:992` passes `ttl = 10` |
-| Toslib API callers | caller-supplied, unvalidated | `ToslibClient.cpp` decrements `ttl` per hop with no ceiling |
-| Lite Client | **none** | `dns_resolve_finish` recurses with no counter (`lite-client.cpp:1994`) |
-
-The Lite Client is not unbounded in the strict sense — each hop consumes at
-least one byte, so a chain terminates within 127 hops (§5.5) — but 127 remote
-get-method executions per lookup is a denial-of-service surface, and no client
-detects a cycle at all. `.tos` v1 fixes the budget at **eight hops** for every
-implementation, requires explicit cycle detection, and requires that exhausting
-the budget be reported as a distinct error rather than as "not found", so an
-operator can tell a misconfigured delegation from a missing name.
+**Step 7 is now implemented uniformly.** The shared constant
+`tos::DNS_MAX_RESOLVER_HOPS = 8` (`crypto/smc-envelope/ManualDns.h`) bounds
+every client: the Lite Client threads it through `dns_resolve_send/finish`,
+Toslib clamps every caller-supplied ttl to it, `toslib-cli` and
+`rldp-http-proxy` pass it directly (historically these were 10, 16,
+caller-supplied, and absent). Exhausting the budget is reported as a distinct
+error, never as "not found", so an operator can tell a misconfigured
+delegation from a missing name. Cycle safety follows from the budget plus the
+progress rule: every accepted hop consumes at least one byte of the encoded
+name, so a delegation loop terminates as a budget error.
 
 The structured result exposed by SDKs and APIs must include:
 
@@ -1062,9 +1057,15 @@ resolved_at_chain_time
 provenance_class            (see the table below)
 ```
 
-No component returns this structure today. Producing it is new node and SDK
-work, tracked in the `tos` and `tos-service-protocol` rows of §11, and this
-document does not describe it as available.
+Delivered so far: `dns.resolved` in the toslib API now carries the pinned
+`block_id`, the ordered `resolver_path`, and a `provenance_class`
+(`chain_anchored`), and both `toslib-cli` and the Lite Client print the
+pinned block, hop count, and resolver path; the JS SDK's resolver returns
+the same structure with `provenance_class = "evaluated"`. The remaining
+fields (canonical name, category names, decoded lifecycle/auction state,
+chain time) are still assembled by callers from the underlying get-methods;
+completing the single structured result stays tracked in the `tos` and
+`tos-service-protocol` rows of §11.
 
 Clients resolving Agent-native objects then perform their protocol-specific
 finalized-state verification. They must use the account address or object ID,
@@ -1103,13 +1104,10 @@ The distinctions are verifiable in the tree:
 
 **Anchoring across hops.** All hops of one lookup must be evaluated against one
 masterchain checkpoint and the shard states it commits to. The Lite Client
-already threads a single `blkid` through every recursion
-(`lite-client.cpp:1994`). Toslib is weaker: the first hop uses the client's
-current query context and each later hop is pinned to the block returned by the
-previous hop (`ToslibClient.cpp:5468`, `:5501`), so a lookup can straddle two
-checkpoints. `.tos` v1 requires a single pinned checkpoint for the whole chain,
-reported in the structured result; the Toslib change belongs to the `tos` row of
-§11.
+threads a single `blkid` through every recursion, and Toslib now latches the
+whole chain to the block the first hop ran at (`finish_dns_resolve` pins
+`block_id` once and every later hop reuses it), reporting that block in
+`dns.resolved.block_id`. A lookup can no longer straddle two checkpoints.
 
 ### 8.2 Caching
 
@@ -1265,7 +1263,7 @@ map; implementing only the smart contracts is not a complete `.tos` product.
 | `tosnetwork/tos` (`crypto/smartcont/dns/`, **ported from `ton-blockchain/dns-contract`**) | Track the latest official Root, Collection, Domain Item, auction/renewal logic, and tests. Make only reviewed deployment adaptations for `.tos`, TOS addresses, launch time, and approved TOS-denominated constants; continuously report the remaining upstream diff | Upstream-parity CI; deterministic builds and published code hashes; exact 105% bid, one-hour extension, refund, lazy-finalization, and 366-day release tests; local multi-validator lifecycle evidence |
 | `tosnetwork/tos` (confirmed generic fixes) | Fix independently reproducible inherited defects: set `get_default_max_name_size()` to 126 (`ManualDns.h:193`); correct the `min(qdomain.size(), 126)` consumed-bit cap (`lite-client.cpp:1958`); make `getTokenData` `uint256`-safe for hashed indices (`json-rpc-server-token.cpp:318, 368`). These are generic correctness fixes, not evidence that `.tos` requires a consensus fork | Boundary vectors from §4.2 passing in C++; a JSON-RPC test asserting a full 256-bit index round-trips as a decimal string; no consensus-state change |
 | `tosnetwork/tos` (production-profile client hardening) | For production clients, add a uniform eight-hop limit and cycle detection to Lite Client, Toslib, `toslib-cli`, and `rldp-http-proxy` (§8); pin every hop to one checkpoint (`ToslibClient.cpp:5468`); bound the proxy cache and make it auction/renewal-aware (§8.2); emit the structured provenance result of §8 | Each change has an independent test and can land without the DNS contracts; hop/cycle, lifecycle cache invalidation, and checkpoint consistency evidence |
-| `tosnetwork/tos` (configuration and activation) | First prove whether existing generic genesis and Config Contract proposal tooling can set parameter 4. Add only the missing `config.dns_root!` helper, proposal wrapper, and localnet scripts demonstrated necessary by that exercise. Treat adding parameter 4 to `critical_params` as an explicit mainnet governance decision, not a prerequisite for the baseline port | A localnet booted with parameter 4 set from genesis and, if governance activation is selected, one where parameter 4 is introduced by proposal; evidence that clients fail closed while it is absent; a recorded decision on critical-parameter policy |
+| `tosnetwork/tos` (configuration and activation) | First prove whether existing generic genesis and Config Contract proposal tooling can set parameter 4. Add only the missing helpers demonstrated necessary by that exercise (the genesis path is delivered: `config.dns_root_smc!`, the commented `gen-zerostate.fif` example, the tostester `dns_root_addr` profile, and `scripts/dns-e2e.py`; the proposal wrapper remains). Treat adding parameter 4 to `critical_params` as an explicit mainnet governance decision, not a prerequisite for the baseline port | A localnet booted with parameter 4 set from genesis and, if governance activation is selected, one where parameter 4 is introduced by proposal; evidence that clients fail closed while it is absent; a recorded decision on critical-parameter policy |
 | `tosnetwork/tos` (`sdk/js`) | TypeScript resolver, canonicalization, category hashes, item-address derivation, and `uint256` index handling; align `NftCollection.ts` with the TOS-TEP-62 DNS profile | Consumption of the shared vectors in TypeScript; parity with the Go and C++ implementations |
 | `tosnetwork/tos` (`tosctl`) | Add `domain normalize`, `bid`, `auction`, `finish` (sending `op::get_static_data`, per §6.4), `renew/top-up`, `release`, `transfer`, `record set/delete`, `delegate`, `resolve`, and `inspect`, using the inherited message formats with offline signing support | CLI golden vectors, exact bid-boundary and lifecycle interpretation tests, restart-safe transaction tracking, hardware/offline signer tests, and real localnet lifecycle |
 | `tosnetwork/tos-service-spec` | Specify how `.tos` aliases may identify Agent, Capability, and Messenger entry points without changing `tos_service_v1` authority | Normative boundary text, negative cases, and shared vectors; no alternate registry semantics |
