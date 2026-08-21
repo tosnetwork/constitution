@@ -8,8 +8,8 @@ This document is a target design, not a deployment claim. The inherited
 resolver primitives exist. The on-chain naming contracts live in the
 `tosnetwork/tos` tree at `crypto/smartcont/dns/`, ported from the TON
 reference contracts (`ton-blockchain/dns-contract` remains the upstream
-parity source); `tosnetwork/tos-domains` owns the registrar and management
-application. Both still require deployment and acceptance evidence. The auction and renewal rules intentionally follow the current TON
+parity source); the registrar and management application lives in the same
+tree at `domains/`. Both still require deployment and acceptance evidence. The auction and renewal rules intentionally follow the current TON
 contracts; Agent-native APIs and production activation are TOS integrations,
 not capabilities inherited from TON.
 
@@ -200,7 +200,7 @@ confused with TOS policy:
 | Profile | Purpose | Required repositories | Effect on `tos` core |
 |---|---|---|---|
 | **Baseline port** | Prove that the TON reference Root/Collection/Item model can register and resolve `.tos` on a TOS localnet | `tos` (`crypto/smartcont/dns/`), `TIP`, deployment configuration, one inspection client | No consensus or TVM change. Use existing generic configuration tooling where it is sufficient; add only missing parameter-4 deployment scripts or confirmed boundary fixes. |
-| **TOS production profile** | Keep the upstream auction/lifecycle contract unchanged while adding code-hash publication, resolver provenance, safe lifecycle interpretation, and Agent-native integrations | Baseline repositories plus `tos-domains`, wallets, explorer, service and Messenger repositories | No consensus or TVM change. Client/API hardening is gated independently from contract parity. |
+| **TOS production profile** | Keep the upstream auction/lifecycle contract unchanged while adding code-hash publication, resolver provenance, safe lifecycle interpretation, and Agent-native integrations | Baseline components plus `domains/` (registrar), wallets, explorer, service and Messenger repositories | No consensus or TVM change. Client/API hardening is gated independently from contract parity. |
 
 The baseline port is an engineering compatibility milestone, not a public
 namespace or a promise of mainnet ownership. Production retains the inherited
@@ -215,8 +215,8 @@ Repository ownership follows the same boundary:
 - the rest of `tosnetwork/tos` owns only inherited platform primitives,
   parameter-4 activation support, generally useful resolver/API fixes, SDKs,
   and operator tooling; and
-- `tosnetwork/tos-domains` is a non-custodial application and never defines
-  protocol bytes independently of the TIP and shared vector corpus.
+- `domains/` in `tosnetwork/tos` is a non-custodial application and never
+  defines protocol bytes independently of the TIP and shared vector corpus.
 
 ## 4. Name Syntax and Canonicalization
 
@@ -1276,7 +1276,7 @@ map; implementing only the smart contracts is not a complete `.tos` product.
 | `tosnetwork/toscan` | Index domain NFTs, auctions, top-ups, records, transfers, releases, and re-auctions; provide forward-confirmed reverse lookup and domain pages | Reorg-safe index tests, raw-address display, checkpoint provenance, and localnet lifecycle coverage |
 | `tosnetwork/ios` | Resolve names for send/contact flows and manage domain NFTs with explicit address/network/auction/renewal confirmation | Unit, UI, signer, and testnet lifecycle tests |
 | `tosnetwork/android` | Match the iOS resolver, send protection, and domain-management behavior without trusting inherited TON APIs | Cross-platform vectors, UI tests, and TOS-native API boundary tests |
-| `tosnetwork/tos-domains` (**established**) | Provide the public registrar and management web application; use wallet signing and chain APIs without holding owner keys, and consume the upstream-compatible ABI and shared vectors rather than redefining auction rules in the frontend | Public bid/refund/finalization recovery UX, transaction-state recovery, overdue-name warnings, phishing defenses, CSP/security review, shared-vector parity, and testnet acceptance |
+| `tosnetwork/tos` (`domains/`, **established**) | Provide the public registrar and management web application; use wallet signing and chain APIs without holding owner keys, and consume the upstream-compatible ABI and shared vectors rather than redefining auction rules in the frontend | Public bid/refund/finalization recovery UX, transaction-state recovery, overdue-name warnings, phishing defenses, CSP/security review, shared-vector parity, and testnet acceptance |
 | `tosnetwork/toscan` (lifecycle indexing) | Keep ownership and record history by Domain Item address plus transaction logical time, and expose active auction, last top-up, derived renewal deadline, release, and re-auction transitions | An index test that owns a name, lets it become releasable, re-auctions it to a different owner at the same address, and keeps historical and current rows separate |
 | shared vector corpus (owned by `tosnetwork/TIP`, consumed everywhere) | Publish one versioned corpus covering §4.2 boundaries, category hashes, `slice_hash` item-index and item-address derivation, bid thresholds, auction durations, renewal deadlines, and the adversarial cases of §13 | The corpus is consumed unmodified by C++, Go, Swift, Kotlin, and TypeScript, and a corpus change fails every consumer build until re-reviewed |
 | `tosnetwork/doc` | Maintain this architecture, operator runbooks, category registry links, deployment addresses, and code hashes | Documentation review tied to released commits and deployed network parameters |
@@ -1491,8 +1491,8 @@ TOS code locations established for this work:
 - [tosnetwork/tos `crypto/smartcont/dns/`](https://github.com/tosnetwork/tos/tree/main/crypto/smartcont/dns)
   — the `.tos` on-chain naming contracts, ported from
   `ton-blockchain/dns-contract`
-- [tosnetwork/tos-domains](https://github.com/tosnetwork/tos-domains) — registrar
-  and management application
+- [tosnetwork/tos `domains/`](https://github.com/tosnetwork/tos/tree/main/domains)
+  — registrar and management application
 
 Inherited design references:
 
