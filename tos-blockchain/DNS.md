@@ -173,12 +173,23 @@ constants remain explicit network choices.
 ### 3.2 Reuse boundary and delivery profiles
 
 Creating `.tos` does **not**, by itself, require a consensus, TVM, TL-B record,
-Lite Server, or validator change. The suffix is selected by the root contract's
-data, and the existing parameter-4 and `dnsresolve` ABI are already sufficient
-to route `tos\0` to a collection. The existing `dns_smc_address` encoding is
-also sufficient for the proposed `wallet`, `agent`, `capability`, and
-`messenger` categories; category names are hashes and do not require a new
-`DNSRecord` constructor.
+Lite Server, or validator change. The existing parameter-4 and `dnsresolve` ABI
+are already sufficient to route `tos\0` to a collection, and the existing
+`dns_smc_address` encoding is sufficient for the proposed `wallet`, `agent`,
+`capability`, and `messenger` categories; category names are hashes and do not
+require a new `DNSRecord` constructor.
+
+Two precisions, because both are easy to state wrongly:
+
+- **The suffix lives in the Root's code, not its data.** Upstream `root-dns.fc`
+  compares the query against literals built in code
+  (`store_slice("ton")`, and likewise for `t.me` and `www.ton`) and keeps only
+  the three target addresses in storage. A `.tos` Root is therefore a
+  source-level adaptation of that contract, not a data configuration of the TON
+  Root. It is still not a *core* change: the Root is an ordinary masterchain
+  contract owned by `dns-contract`.
+- **The one upstream feature that would require a core change is ConfigParam 80**
+  (§6.6). Launching `.tos` does not need it, and v1 does not depend on it.
 
 Work is divided into two profiles so that inherited compatibility is not
 confused with TOS policy:
@@ -208,15 +219,27 @@ Repository ownership follows the same boundary:
 
 ### 4.1 Inherited registration labels and UI policy
 
-The Collection keeps the upstream registration rule exactly: the plaintext
-second-level label is byte-aligned, is 4 through 126 bytes, and contains only
-lowercase ASCII `[a-z0-9-]`. Leading or trailing hyphens and `xn--` are not
-special to the contract. Registration software must not describe a stricter
-frontend convention as an on-chain rule or reject resolution of a name that
-the contract validly registered.
+The Collection keeps the upstream registration rule exactly. `check_domain_string`
+(`func/dns-utils.fc`) accepts a byte only if it is `0`-`9`, `a`-`z`, or a hyphen
+that is **neither the first nor the last byte** of the label:
+
+```text
+valid_char = (is_hyphen & (i > 0) & (i < len - 8))
+           | ((char >= 48) & (char <= 57))
+           | ((char >= 97) & (char <= 122))
+```
+
+Combined with the Collection's length and alignment checks, the on-chain rule is:
+byte-aligned, `len > 3 * 8` and `len <= 126 * 8` (that is, 4 through 126 bytes),
+lowercase ASCII alphanumeric or interior hyphen. So leading and trailing hyphens
+**are** rejected by the contract. What the contract does *not* restrict is
+consecutive interior hyphens and the `xn--` prefix, both of which register
+normally. Registration software must not describe a stricter frontend convention
+as an on-chain rule, nor refuse to resolve a name that the contract validly
+registered.
 
 For safer presentation, `tos-domains` and wallets should recommend labels no
-longer than 63 bytes, reject leading/trailing hyphens and `xn--`, reserve
+longer than 63 bytes, warn on `xn--` and on consecutive hyphens, reserve
 confusable Unicode, and show the exact lowercase label before signing. These
 are UX protections only. A direct contract caller can register any label that
 satisfies the inherited rule, so resolvers and indexers must support it subject
@@ -302,6 +325,8 @@ Boundary vectors that the TIP corpus must contain verbatim:
 | Uppercase | `Alice.tos` | — | reject for registration/mutation; lowercase only for lookup |
 | Non-ASCII | `älice.tos` | — | reject in v1 |
 | `xn--` | `xn--80ak6aa92e.tos` | valid encoding | contract accepts; public UI warns/refuses by policy |
+| Interior hyphen | `ab-c.tos` | `tos\0ab-c\0` (9) | contract accepts |
+| Leading/trailing hyphen | `-abc.tos`, `abc-.tos` | valid encoding | **contract rejects** (`check_domain_string`, error 203); resolution of an existing name is unaffected |
 
 The canonical wire bytes, category hashes, auction thresholds, deterministic
 contract addresses, and negative cases must be frozen as cross-language test
@@ -360,9 +385,20 @@ authority, blast radius, and required evidence:
 | Change | Mechanism | Blast radius | Required gate |
 |---|---|---|---|
 | Parameter 4 value | masterchain config proposal | replaces the entire namespace root for every client | explicit mainnet governance decision below |
-| Root resolver data (which suffix delegates where) | internal message to the root contract, under its own owner policy | replaces the `.tos` collection for every name | announced activation block; audited collection code hash |
-| `.tos` collection replacement | root delegation change to a newly deployed Collection | registrar policy and deterministic item address for names under the new Collection | upstream-parity report, migration plan, new address vectors, and explicit governance activation |
+| Which Collection `tos\0` delegates to | **deploy a new Root and repoint parameter 4** — there is no in-place edit | replaces the `.tos` Collection for every name | announced activation block; audited Root and Collection code hashes; new item-address vectors |
+| `.tos` Collection replacement | same as above; a live Collection cannot be upgraded | registrar policy and deterministic item address for names under the new Collection | upstream-parity report, migration plan, new address vectors, explicit governance activation |
 | Domain item code in a Collection | immutable code cell used in StateInit | changing it changes every derived item address under that Collection | treat as a new Collection deployment; never mutate or silently substitute it |
+
+**The upstream Root and Collection are immutable by construction, and TOS keeps
+them that way.** `root-dns.fc` has an empty `recv_internal`, no `recv_external`,
+no owner field, and no `set_code`; its storage holds only the delegated
+resolver addresses, while the suffix literals are compiled into the code.
+`nft-collection.fc` stores only `(collection_content, nft_item_code)`, handles
+exactly `op == 0` (register) and `op::fill_up`, and throws `0xffff` on anything
+else — it too has no owner, no admin operation, and no `set_code`. There is
+therefore no "root data update" or "collection upgrade" surface at all.
+Parameter 4 is the single lever over the whole namespace, which makes the
+governance question below sharper rather than softer.
 
 **Parameter 4 is currently an ordinary-vote parameter.** As shown in §3.1 it
 appears in neither `mandatory_params` nor `critical_params`, so under the
@@ -382,13 +418,20 @@ In every case, clients treat an absent parameter 4 as "DNS unavailable", never
 as "name not found". Until a policy is selected and activated, this document
 makes no claim that the root is governance-protected.
 
-The upstream Collection has no TOS-specific emergency auction pause. Adding one
-would be a semantic fork and is outside v1. The inherited Domain Item does,
-however, implement `process_governance_decision`: an entry for its item index in
-ConfigParam 80 can authorize transfer or destruction. TOS must explicitly
-govern and disclose this seizure path rather than claim that it does not exist.
-Incident response may protect frontend access and publish warnings, but must
-not invent additional mutation authority.
+The upstream Collection has no emergency auction pause, and the immutability
+above means none can be added to a deployed instance. Adding one to the source
+would be a semantic fork and is outside v1.
+
+The inherited Domain Item does implement `process_governance_decision`
+(`op = 0x44beae41`): with no sender check at all, **any** caller may execute it,
+and the authority comes entirely from an entry for the item's index in
+ConfigParam 80 — `config_op = 0` transfers the domain to an address read from
+the config entry, `config_op = 1` destroys the item with send mode `128 + 32`.
+It additionally requires that no auction is active. §6.6 records why this path
+is currently inert on TOS and what enabling it would cost. TOS must disclose
+and govern it rather than claim it does not exist, and must not broaden it.
+Incident response may protect frontend access and publish warnings, but cannot
+invent additional mutation authority.
 
 ### 5.2 `.tos` collection and registrar
 
@@ -396,8 +439,13 @@ The `.tos` collection is a direct TOS deployment of the latest reviewed
 `ton-blockchain/dns-contract` Collection contract. At the time of this review,
 `tosnetwork/dns-contract:main` and `ton-blockchain/dns-contract:main` are
 identical at commit `d08131031fb659d2826cccc417ddd9b98476f814`
-(`root dns 2.0`). Before any implementation commit, the TOS fork must compare
-against upstream `main` and incorporate newer compatible fixes first.
+("Merge pull request #2 from ton-blockchain/root2", 2022-10-30), verified
+file-by-file: `nft-item.fc`, `nft-collection.fc`, `root-dns.fc`, and
+`dns-utils.fc` have identical blob hashes in both repositories, and upstream has
+only the single branch `main` plus the tags `v1.0`, `root-v1.0`, and
+`root-v1.1`. The fork carries no TOS commits yet. Before any implementation
+commit, the TOS fork must recompare against upstream `main` and incorporate
+newer compatible fixes first.
 
 The collection:
 
@@ -528,8 +576,25 @@ auction is present through `get_auction_info()`.
 
 The Domain Item is deployed once at its deterministic address. Initial
 registration initializes it and starts its first auction. After a year without
-renewal, `dns_balance_release` starts another auction in the same item. The
-item is never redeployed for a later owner.
+renewal, `dns_balance_release` starts another auction in the same item, so an
+ordinary change of owner never redeploys the contract.
+
+Two boundary behaviours complete that statement:
+
+- **A duplicate registration is refunded, not applied.** If the Collection
+  deploys onto an item that is already initialized, the item takes the
+  `init? & sender == collection_address` branch and returns the whole remaining
+  message value to the would-be bidder (`send_msg(from_address, 0, 0, cur_lt(),
+  null(), 64)`). It does not restart an auction or overwrite state.
+- **Governance destruction is the one case where the address is reused.**
+  `process_governance_decision` with `config_op = 1` sends mode `128 + 32`,
+  which carries the balance out and deletes the account. The same ConfigParam 80
+  entry still causes the Collection to reject registration with error 205, so
+  governance must remove that entry before anyone can register the label again.
+  Only then can the Collection re-create the item at the same address with fresh
+  state and a fresh auction. Any indexer or wallet that assumes an item's history
+  is continuous must handle account deletion, configuration removal, and later
+  re-creation at the same address as distinct finalized events.
 
 ### 5.4 Subdomains - preserve TEP-81 behavior
 
@@ -547,6 +612,15 @@ Therefore the owner of `alice.tos` can:
 A separately deployed subresolver may implement records such as
 `translate.alice.tos`, but it is not a tradable subdomain NFT in v1. Clients
 must display that the parent owner can replace or remove the delegation.
+
+**A delegated subresolver must accept a slice that does not begin with NUL.**
+The Domain Item consumes exactly the eight bits of its own self separator and
+returns `(8, next_resolver)`, so the delegated contract receives `translate\0`
+with the separator already consumed. A subresolver copied from `nft-item.fc`
+would reject it immediately (`throw_unless(413, starts_with_zero_byte)`).
+`dns-manual-code.fc` is safe because it strips an optional leading NUL and
+resolves either form (`crypto/smartcont/dns-manual-code.fc:312-317`). This is a
+live porting trap, not a theoretical one, and belongs in the shared vectors.
 
 TOS must not modify the Domain Item to serve bounded subdomain records directly
 unless a later TIP demonstrates a need. Keeping the inherited eight-bit
@@ -611,18 +685,24 @@ machine.
 
 Registration follows the upstream Collection contract:
 
-1. The bidder sends an ordinary internal message whose body is the plaintext
-   second-level label and whose value covers the minimum opening bid and gas.
-2. The Collection checks that the auction has launched, the label is byte
-   aligned, its length is greater than three and at most 126 bytes, and every
-   byte is lowercase ASCII `a`-`z`, `0`-`9`, or `-`. This is the inherited
-   contract rule; stricter UI rules in Section 4 are not a different auction.
-3. If ConfigParam 80 is present, the Collection applies the inherited blacklist
-   check. TOS must not make this optional upstream hook a new consensus
-   prerequisite merely to launch `.tos`.
-4. The Collection checks the inherited minimum-price curve, derives
-   `item_index = slice_hash(label)`, and deploys the deterministic Domain Item
-   with the sender as first bidder and the attached bid as the current maximum.
+1. The bidder sends an ordinary internal message in the standard text-comment
+   shape — a 32-bit zero opcode followed by the plaintext label — whose value
+   covers the minimum opening bid and gas. `read_domain_from_comment` walks the
+   single-ref chain, so a long label may span cells.
+2. The Collection requires `now() > auction_start_time` (strict), then checks
+   `len > 3 * 8`, `len <= 126 * 8`, `mod(len, 8) == 0`, and
+   `check_domain_string(label)` in that order (errors 199, 200, 201, 202, 203).
+   This is the inherited contract rule; the stricter UI conventions in Section 4
+   are not a different auction.
+3. The Collection requires `msg_value >= get_min_price(len, now())` (error 204)
+   — the length-tiered curve that decays 10% per 30-day month for at most 21
+   months and is then flat.
+4. It derives `item_index = slice_hash(label)` and, **only if ConfigParam 80
+   exists**, rejects a listed index (error 205). On TOS that parameter cannot
+   exist today, so this check silently passes for every label; see §6.6.
+5. It deploys the deterministic Domain Item, passing the sender as first bidder
+   and the attached value as the current maximum bid. The item sets its own
+   `auction_end_time` and `last_fill_up_time` on receipt.
 
 The label is public before inclusion, exactly as it is in TON DNS. The auction
 is the price-discovery and anti-sniping mechanism; TOS does not claim that it
@@ -633,44 +713,98 @@ hides registration intent from block producers or observers.
 The auction state is held inside the Domain Item and retains the upstream
 rules:
 
-- the first-auction duration decreases from seven days to one hour in twelve
-  monthly steps after the configured launch timestamp, then remains one hour;
-- a replacement bid must be at least 105% of the current maximum bid;
-- an accepted bid immediately sends the previous maximum bid back to the
-  previous bidder using the upstream message behavior;
-- a bid accepted with less than one hour remaining extends the end time so that
-  at least one hour remains; and
-- the highest bidder wins and pays the full winning bid. This is not a
-  second-price auction.
+- **Initial duration.** Only the *first* auction ramps. With
+  `months = min(floor((now() - auction_start_time) / 2592000), 12)`, the
+  duration is `604800 - (604800 - 3600) * months / 12`, which is exactly
+  `604800 - 50100 * months` seconds — seven days falling to one hour in twelve
+  discrete steps of thirty days each, so the ramp completes after 360 days, not
+  a calendar year. A release re-auction (§6.5) never uses this curve; it is
+  always seven days.
+- **Bid threshold.** A replacement bid must satisfy
+  `msg_value >= muldiv(max_bid_amount, 105, 100)` (error 407), i.e. at least
+  `floor(max_bid * 105 / 100)`, compared inclusively.
+- **Outbid refund is capped, and the cap is real.** The item sends
+  `min(max_bid_amount, my_balance - min_tons_for_storage())` to the previous
+  bidder as `op::outbid_notification` (`0x557cea20`) with **send mode 1**
+  (fees paid separately, action errors revert the whole transaction). Because
+  `min_tons_for_storage()` is `1e9` base units and `my_balance` already includes
+  the incoming bid, the cap normally does not bind — but a client must not
+  assume an outbid refund always equals the previous bid.
+- **Every outgoing message is non-bounceable.** `send_msg` writes the header
+  `0x10`, so nothing sent by the Domain Item can bounce back. There is no
+  bounce-recovery path anywhere in this design, and none should be described.
+- **Anti-sniping extension.** `delta_time = 3600 - (auction_end_time - now())`;
+  if positive, `auction_end_time += delta_time`, so any bid leaves at least one
+  hour on the clock.
+- **Completion is strict.** `auction_complete = now() > auction_end_time`, so a
+  bid arriving exactly at `auction_end_time` is still an ordinary bid.
+- **First price.** The highest bidder wins and pays the full winning bid. This
+  is not a second-price auction, and there is no bidder iteration.
 
-The exact integer rounding, balance reservation, send modes, bounce behavior,
-and duration calculation are defined by the pinned upstream FunC source and its
-tests, not by a reimplementation from this prose.
+Balance reservation, exact gas costs, and every other unstated detail are
+defined by the pinned upstream FunC source and its tests, not by a
+reimplementation from this prose.
 
 ### 6.4 Finalization
 
-Auction finalization is lazy. After `auction_end_time`, a later non-zero
-operation finalizes the auction before its requested owner operation is
-processed: the winning amount is sent to the Collection, the highest bidder is
-installed as owner, and the auction fields are cleared. There is no separate
+Auction finalization is lazy and has no dedicated operation. After
+`auction_end_time`, the item runs the finalization block *before* dispatching
+whatever operation arrived: it forwards
+`min(max_bid_amount, (my_balance - msg_value) - min_tons_for_storage())` to the
+Collection as `op::fill_up` with **send mode 2** (errors ignored), installs
+`max_bid_address` as owner, and clears the auction cell. There is no separate
 settlement contract and no loop over bidders.
 
-Clients must therefore distinguish “auction end time has passed” from “the
-finalization transaction has executed”. A registrar may offer a finish action,
-but it must invoke the inherited item behavior rather than invent a second
-settlement path.
+**Not every message can finalize, and a wrong one silently cannot.** Three
+constraints decide this:
+
+- the item reads a 64-bit `query_id` before the finalization block, so any
+  non-zero-op body lacking it throws;
+- finalization and the requested operation share one transaction, so an
+  operation that throws — including any unrecognized opcode, which falls
+  through to `throw(0xffff)` — rolls the finalization back with it; and
+- an empty body (`op == 0`) never finalizes. It takes the bid/top-up branch,
+  where a completed auction demands `sender == owner_address`; the owner is
+  still `addr_none` at that moment, so a plain transfer after the auction ends
+  always fails with error 406.
+
+The one inherited operation that any address can send and that always completes
+is **`op::get_static_data()` (`0x2fcb26a2`)**. It carries a `query_id`, has no
+sender check, and its only effect is a `report_static_data` reply with mode 64.
+Notably it does **not** refresh `last_fill_up_time`, so using it to finalize
+does not extend the renewal deadline. Registrars and CLIs must implement
+"finish auction" as exactly this message; the owner-gated operations
+(`transfer`, `edit_content`, `change_dns_record`) also finalize, but only for
+the winner, and only because finalization installs them as owner first.
+
+Clients must therefore distinguish "auction end time has passed" from "the
+finalization transaction has executed", and must read `get_auction_info()`
+rather than infer ownership from elapsed time.
 
 ### 6.5 Renewal and release
 
 Ownership is kept alive by funding the Domain Item, using the inherited
 `last_fill_up_time` lifecycle:
 
-- an owner top-up refreshes `last_fill_up_time`;
-- a successful transfer or record update also refreshes it;
-- initial deployment sets it when the first auction starts, and auction
-  finalization preserves that value rather than resetting it to the win time;
-- `one_year` is the upstream constant `31,622,400` seconds (366 days); and
+- initial deployment sets it when the first auction starts;
+- **every accepted bid refreshes it**, so during an auction the clock tracks the
+  last bid rather than the deployment;
+- an owner top-up (`op == 0` from the owner, after the auction) refreshes it;
+- a successful transfer, `edit_content`, `change_dns_record`, or a release
+  refreshes it;
+- auction finalization **preserves** the existing value rather than resetting it
+  to the win time, and the permissionless finish operation of §6.4 does not
+  refresh it either;
+- `one_year` is the upstream constant `31,622,400` seconds (366 days), compared
+  strictly (`now() - last_fill_up_time > one_year`); and
 - there is no grace period.
+
+The consequence is worth stating plainly: **a winner's first term is not 366
+days from winning.** It runs from the last bid in the auction that they won, and
+if they take no action afterwards the item becomes releasable that much sooner.
+Wallets and registrars must compute the deadline from
+`get_last_fill_up_time() + 31,622,400` and surface it, never from the purchase
+date.
 
 Once `now() - last_fill_up_time > one_year` and no auction is active, anyone may
 invoke the inherited balance-release operation with at least the current
@@ -679,24 +813,62 @@ clears the owner, and immediately starts a new seven-day open auction with the
 caller as its first bidder. Re-auction uses the same permanent Domain Item
 address; the item is not redeployed.
 
-The upstream item retains its record dictionary, and its raw `dnsresolve`
-getter does not independently suppress records merely because the renewal time
-has elapsed or an auction is active. Consequently, wallets, gateways, Agent
-software, payment flows, and other security-sensitive consumers must inspect
-`get_auction_info()` and `get_last_fill_up_time()` and fail closed for an active
-auction or an overdue item. This is a required client safety policy, not a
-reason to fork the contract state machine. A later upstream fix should be
-evaluated and merged through the parity process in Section 6.1.
+Release requires `cell_null?(auction)`, so a name already under auction cannot
+be released again, and the refund to the former owner is
+`(my_balance - msg_value) - min_tons_for_storage()` sent with **send mode 2**
+(errors ignored, non-bounceable): if that send fails, the value stays in the
+item and the former owner receives nothing.
+
+**Records survive both release and the change of owner.** Release and
+finalization both write the existing `content` cell straight back, and the item
+has no path that clears the record dictionary. A new owner therefore inherits
+the previous owner's records — including a `dns_next_resolver` delegation to a
+resolver the previous owner still controls — and they keep resolving until the
+new owner overwrites each one. Registrars must prompt a new owner to review and
+replace inherited records as the first post-purchase step.
+
+The raw `dnsresolve` getter does not independently suppress records merely
+because the renewal time has elapsed, an auction is active, or ownership is
+`addr_none`. There is no `expires_at` getter and no on-chain suppression.
+Consequently, wallets, gateways, Agent software, payment flows, and other
+security-sensitive consumers must inspect `get_auction_info()` and
+`get_last_fill_up_time()` and fail closed for an active auction or an overdue
+item. This is a required client safety policy, not a reason to fork the
+contract state machine. A later upstream fix should be evaluated and merged
+through the parity process in Section 6.1.
 
 ### 6.6 Deployment parameters and upstream updates
 
 The inherited minimum-price curve and auction formulas stay unchanged unless
-TON upstream changes them. TOS must nevertheless replace the upstream hardcoded
-TON launch timestamp when starting a new `.tos` namespace; otherwise the
-twelve-month duration ramp has already elapsed. The chosen TOS launch timestamp
-and any TOS-denominated price constants require governance approval, published
-source diffs, reproducible code hashes, and test vectors at boundary times and
-amounts.
+TON upstream changes them. Two deployment values nevertheless force an explicit
+decision.
+
+**Launch timestamp.** Upstream hardcodes `auction_start_time = 1659171600`
+(30 July 2022). The two available choices are not equivalent and this document
+does not pick one:
+
+| Option | Effect on a `.tos` launch today |
+|---|---|
+| Keep the upstream timestamp | `months` saturates at 12 and 21, so every first auction opens already at the one-hour minimum duration and every label opens at the fully decayed floor price. Anti-sniping and price discovery still work, but there is no extended launch ramp. |
+| Use a TOS activation timestamp | The upstream algorithm is preserved exactly and its seven-day-to-one-hour ramp and 21-month price decay restart from `.tos` launch. Because the timestamp is a compile-time constant in `dns-utils.fc`, this is an explicit source/code change that produces a different code hash, not a data-only deployment choice. |
+
+**Unit scale is already identical; do not confuse it with an economic change.**
+Upstream `one_ton` and `min_tons_for_storage()` are both `1e9` base units, and
+TOS `Tomi` is also `1000000000` (`crypto/fift/lib/Currency.fif:5`). Renaming the
+constants is cosmetic. Only the *magnitudes* — the 1000/500/400/300/200/100/50/10
+tier table and the one-unit storage reserve — are economic decisions requiring
+governance approval, published source diffs, reproducible code hashes, and test
+vectors at boundary times and amounts.
+
+**Auction proceeds have no withdrawal path.** Finalization forwards the winning
+bid to the Collection as `op::fill_up`, and the upstream Collection handles that
+opcode by doing nothing at all (`if (op == op::fill_up) { return (); }`). It has
+no owner, no admin operation, no withdrawal, and no `set_code`. Proceeds
+therefore accumulate in the Collection's balance permanently — an implicit burn,
+not a treasury. TOS must either accept that explicitly as the v1 economic
+outcome, or acknowledge that adding a proceeds destination is a semantic fork of
+the Collection requiring its own TIP, review, and vectors. A gate that merely
+says "proceeds destination approved" without resolving this is not satisfied.
 
 Upstream synchronization is continuous, not a one-time port:
 
@@ -708,12 +880,42 @@ Upstream synchronization is continuous, not a one-time port:
    them; and
 5. publish the remaining diff and deployed code hashes before activation.
 
-ConfigParam 80 is more than a registration blacklist. The inherited Collection
-rejects a new label whose item index is present, and an existing Domain Item can
-process a matching governance decision to transfer or destroy itself. Tests,
-wallet warnings, TOSCan, and governance runbooks must cover both effects. TOS
-must not remove or broaden this path silently; any policy change is a reviewed
-contract diff and governance decision.
+**ConfigParam 80 is more than a registration blacklist, and on TOS it cannot
+currently exist.** Upstream uses `dns_config_id = 80` in production and `-80` on
+testnet. Both effects hang off it: the Collection rejects a new label whose item
+index is listed, and any caller can drive an existing Domain Item's
+`process_governance_decision` to transfer or destroy it (§5.1).
+
+In the current TOS tree, index 80 is unassigned — `block.tlb` declares
+`JettonBridgeParams` at 79, 81, 82, and 83 and skips 80 — and the generated
+validator refuses it: `ConfigParam::get_tag` has `case 79` and `case 81` with
+`default: return -1` (`crypto/block/block-auto.cpp:19592-19609`), so `validate_skip`
+returns false, `check_one_config_param` fails
+(`crypto/block/block.cpp:1865-1883`), and `valid_config_data` rejects the entire
+configuration. A proposal that sets parameter 80 would therefore be refused by
+collation and validation.
+
+The practical consequences, which the design must not blur:
+
+- **Today the mechanism is inert.** `config_param(80)` returns null, so the
+  Collection's blacklist check is skipped for every label, and
+  `process_governance_decision` throws on `null.begin_parse()`. Launching `.tos`
+  neither needs nor gains this feature.
+- **Enabling it at index 80 is a TOS core change** — a `block.tlb` declaration
+  plus regenerated `block-auto.{h,cpp}` that every validator must run. That is
+  precisely the class of change §3.2 says `.tos` does not otherwise require.
+- **A negative index avoids the core change.** `check_one_config_param` returns
+  true unconditionally for `idx < 0`, which is why upstream's testnet build uses
+  `-80`. Adopting a negative `dns_config_id` would make the feature available
+  with no TL-B or validator change, at the cost of an unvalidated parameter
+  shape.
+
+Choosing among *no blacklist* (v1 default), *negative index*, and *core-declared
+index 80* is a governance decision that must be recorded before activation, not
+left implicit. Whichever is chosen, tests, wallet warnings, TOSCan, and
+governance runbooks must cover both effects, and TOS must not remove or broaden
+the path silently; any policy change is a reviewed contract diff and a
+governance decision.
 
 No application repository may redefine bid thresholds, auction timing, renewal
 deadlines, or item-state interpretation. They consume the contract ABI and the
@@ -1009,8 +1211,9 @@ Implementations must address at least these threats:
 - **observable bidding and front-running:** registration labels and bids are
   public, as in TON DNS; clients must show the current bid, minimum increment,
   and end time and must never promise sealed-bid confidentiality;
-- **homographs:** the contract is lowercase ASCII but permits `xn--` and edge
-  hyphens; public UIs apply and clearly label the stricter policy in §4.1;
+- **homographs:** the contract is lowercase ASCII and rejects edge hyphens, but
+  permits `xn--` and consecutive interior hyphens; public UIs apply and clearly
+  label the stricter presentation policy in §4.1;
 - **network confusion:** caches and UI confirmations are bound
   to the network domain tuple;
 - **malicious resolvers:** strict consumed-bit, component-boundary, schema,
@@ -1061,7 +1264,7 @@ map; implementing only the smart contracts is not a complete `.tos` product.
 | `tosnetwork/tos` (production-profile client hardening) | For production clients, add a uniform eight-hop limit and cycle detection to Lite Client, Toslib, `toslib-cli`, and `rldp-http-proxy` (§8); pin every hop to one checkpoint (`ToslibClient.cpp:5468`); bound the proxy cache and make it auction/renewal-aware (§8.2); emit the structured provenance result of §8 | Each change has an independent test and can land without the DNS contracts; hop/cycle, lifecycle cache invalidation, and checkpoint consistency evidence |
 | `tosnetwork/tos` (configuration and activation) | First prove whether existing generic genesis and Config Contract proposal tooling can set parameter 4. Add only the missing `config.dns_root!` helper, proposal wrapper, and localnet scripts demonstrated necessary by that exercise. Treat adding parameter 4 to `critical_params` as an explicit mainnet governance decision, not a prerequisite for the baseline port | A localnet booted with parameter 4 set from genesis and, if governance activation is selected, one where parameter 4 is introduced by proposal; evidence that clients fail closed while it is absent; a recorded decision on critical-parameter policy |
 | `tosnetwork/tos` (`sdk/js`) | TypeScript resolver, canonicalization, category hashes, item-address derivation, and `uint256` index handling; align `NftCollection.ts` with the TOS-TEP-62 DNS profile | Consumption of the shared vectors in TypeScript; parity with the Go and C++ implementations |
-| `tosnetwork/tos` (`tosctl`) | Add `domain normalize`, `bid`, `auction`, `finish`, `renew/top-up`, `release`, `transfer`, `record set/delete`, `delegate`, `resolve`, and `inspect`, using the inherited message formats with offline signing support | CLI golden vectors, exact bid-boundary and lifecycle interpretation tests, restart-safe transaction tracking, hardware/offline signer tests, and real localnet lifecycle |
+| `tosnetwork/tos` (`tosctl`) | Add `domain normalize`, `bid`, `auction`, `finish` (sending `op::get_static_data`, per §6.4), `renew/top-up`, `release`, `transfer`, `record set/delete`, `delegate`, `resolve`, and `inspect`, using the inherited message formats with offline signing support | CLI golden vectors, exact bid-boundary and lifecycle interpretation tests, restart-safe transaction tracking, hardware/offline signer tests, and real localnet lifecycle |
 | `tosnetwork/tos-service-spec` | Specify how `.tos` aliases may identify Agent, Capability, and Messenger entry points without changing `tos_service_v1` authority | Normative boundary text, negative cases, and shared vectors; no alternate registry semantics |
 | `tosnetwork/tos-service-protocol` | Add a Go resolver/verifier library that consumes finalized TOS state, reproduces canonical encoding and category hashes, returns provenance, checks auction/renewal state, and resolves an alias to an address and then to a Native object ID with the §7.1 re-derivation before existing verification; extend `api/tos/service/v1/native.proto` and regenerate `gen/` for any resolution response crossing the Connect boundary | Cross-language vector parity; results labelled `quorum_agreed`, never `proof`; cycle/lifecycle/reorg tests; generated-code and API-compatibility checks |
 | `tosnetwork/tos-service-gateway` | Expose bounded read-only resolution and verified aliases in discovery results; cache only within checkpoint and auction/renewal bounds | Gateway restart/cache tests and proof that a Gateway cannot create or mutate name or Native authority |
@@ -1143,9 +1346,12 @@ Every gate must be evidenced against a specific commit:
 - **G3 — frozen formats:** the TIP and shared corpus freeze encoding, category
   hashes, `slice_hash` item index, StateInit, ABI, operation codes, exact 105%
   boundary rounding, durations, extension, refund, and release behavior.
-- **G4 — economics:** the launch timestamp, price curve/constants, proceeds
-  destination and accounting, and optional blacklist/reservation policy are
-  approved. No alternate auction model is hidden in economics configuration.
+- **G4 — economics:** the launch-timestamp choice of §6.6 is recorded with its
+  consequences; the price tier magnitudes and storage reserve are approved; and
+  the fact that proceeds accumulate irrecoverably in the Collection is either
+  accepted in writing as the v1 outcome or replaced through an approved
+  Collection fork. No alternate auction model is hidden in economics
+  configuration.
 - **G5 — implementation review:** two independent reviews cover the registrar
   and item, and an independent resolver reproduces the shared vectors.
 - **G6 — lifecycle evidence:** a public testnet demonstrates registration,
@@ -1157,8 +1363,14 @@ Every gate must be evidenced against a specific commit:
   raw address, network, checkpoint age, auction state, and renewal deadline.
 - **G8 — reorg and cache behavior:** resolvers and indexers roll back abandoned
   checkpoints and invalidate affected name, lifecycle, and delegation caches.
-- **G9 — governance and operations:** parameter 4 and ConfigParam 80 policy,
-  upgrade notice, incident response, and public contact path are active.
+- **G9 — governance and operations:** the parameter-4 protection decision of
+  §5.1 is active; the ConfigParam 80 choice of §6.6 is recorded, including
+  whether any core change was made and who may add an entry; upgrade notice,
+  incident response, and a public contact path are published. The runbook states
+  that governance destruction deletes the item account but its ConfigParam 80
+  entry continues to block registration until governance removes the entry; a
+  later registration then re-creates fresh state at the same deterministic
+  address.
 - **G10 — upstream monitoring:** an owner and response SLA are assigned for new
   official TON DNS changes, including expedited handling of security fixes.
 
@@ -1176,21 +1388,38 @@ At minimum, the shared corpus and integration suite cover:
   highest-bidder replacement, and refund destination/value;
 - bids outside the auction window, a bid inside the last hour extending the
   auction to at least one hour, and multiple extensions;
-- lazy finalization after the end time, full winning-bid transfer to the
-  Collection, owner assignment, cleared auction state, and no bidder loop;
-- owner top-up, transfer, and record update refreshing `last_fill_up_time`;
-  rejection at the 366-day boundary and permission only after `>` one year;
+- leading and trailing hyphens rejected on-chain (error 203) while interior and
+  consecutive hyphens register, and a duplicate registration onto a live item
+  refunding the sender instead of restarting an auction;
+- lazy finalization after the end time: the capped amount forwarded to the
+  Collection, owner assignment, cleared auction state, no bidder loop, and
+  `last_fill_up_time` left unchanged;
+- finalization triggered by `op::get_static_data` from a non-winner, versus an
+  unknown opcode and a body without a `query_id` both leaving the auction
+  unfinalized, and `op == 0` after the end time failing with error 406;
+- every accepted bid refreshing `last_fill_up_time`, alongside owner top-up,
+  transfer, and record update; rejection at the 366-day boundary and permission
+  only after `>` one year;
 - balance release refunding the former owner, clearing ownership, opening a
   seven-day auction with the caller as first bidder, and retaining the same
   Domain Item address;
+- records surviving release and re-auction so that a new owner inherits the
+  previous owner's dictionary and delegation until each entry is overwritten;
 - raw-record retention across overdue/re-auction state, together with every
   wallet, Gateway, Messenger, Agent, payment, and Site client failing closed on
   lifecycle checks;
+- with ConfigParam 80 absent — the current TOS state — registration succeeding
+  for any valid label and `process_governance_decision` throwing;
+- if ConfigParam 80 is enabled: destruction deleting the account, the retained
+  config entry continuing to reject registration with error 205, removal of the
+  entry, and subsequent registration re-creating fresh state at the same item
+  address without merging the two account lifetimes;
 - record update/delete, NFT transfer, delegated subdomains, partial resolution,
   resolver loops, excess depth, malformed consumed counts, category/type
   mismatches, unknown TL-B tags, and trailing data;
-- the Section 5.5 hop trace byte for byte and hop exhaustion distinct from “not
-  found”;
+- the Section 5.5 hop trace byte for byte, a delegated subresolver correctly
+  handling a slice with **no** leading NUL, and hop exhaustion distinct from
+  “not found”;
 - finalized checkpoint change, cache invalidation, indexer rollback, and
   historical ownership separation by transaction logical time;
 - correct provenance class, with `quorum_agreed` never presented as proof;
@@ -1253,11 +1482,19 @@ TOS documents:
 - [ai-inference-sharing-tos-domains.md](ai-inference-sharing-tos-domains.md)
 - [TOS Agent-native Messenger architecture](https://github.com/tosnetwork/tos-service-spec/blob/main/docs/AGENT_NATIVE_MESSENGER_V1.md)
 
+TOS repositories established for this work:
+
+- [tosnetwork/dns-contract](https://github.com/tosnetwork/dns-contract) — fork of
+  `ton-blockchain/dns-contract`; owns the on-chain naming product
+- [tosnetwork/tos-domains](https://github.com/tosnetwork/tos-domains) — registrar
+  and management application; currently empty
+
 Inherited design references:
 
 - [TON DNS documentation](https://github.com/ton-blockchain/docs/blob/main/content/foundations/web3/ton-dns.mdx)
 - [TEP-81: TON DNS Standard](https://github.com/ton-blockchain/TEPs/blob/master/text/0081-dns-standard.md)
-- [TON DNS reference contracts](https://github.com/ton-blockchain/dns-contract)
+- [TON DNS reference contracts](https://github.com/ton-blockchain/dns-contract) — the parity source, pinned in §6.1
+- [TON DNS frontend](https://github.com/ton-blockchain/dns) — the upstream analogue of `tos-domains`, useful as a feature-scope reference only
 
 These TON references explain the inherited resolver mechanics. This document,
 the accepted TOS TIP, and deployed TOS contract code are authoritative for the
