@@ -77,7 +77,12 @@ Setting it:
   networks pin it through `NetworkConfig.dns_root_addr` in the tostester
   zerostate generator.
 - **Post-genesis**: an ordinary config-change proposal through the
-  configuration contract.
+  configuration contract, accepted by validator vote (rehearsed end to end
+  by `scripts/dns-e2e.py`). Note that proposal acceptance is governed by
+  ConfigParam 11 (ConfigVotingSetup): with the default values a proposal
+  needs wins across multiple voting rounds, and rounds advance only when
+  the validator set rotates — single-validator test networks must relax
+  the setup to rehearse acceptance.
 - The pinned value may be the **counterfactual** address of a root deployed
   later; clients keep failing closed until the account actually exists.
   `scripts/dns-e2e.py` demonstrates the full flow (pin at genesis, deploy at
