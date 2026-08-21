@@ -5,11 +5,11 @@
 - **Canonical public suffix:** `.tos`
 
 This document is a target design, not a deployment claim. The inherited
-resolver primitives exist, and TOS has established two dedicated repositories:
-`tosnetwork/dns-contract`, forked from the TON reference contracts, owns the
-on-chain naming product; `tosnetwork/tos-domains` owns the registrar and
-management application. Both still require TOS implementation and acceptance
-evidence. The auction and renewal rules intentionally follow the current TON
+resolver primitives exist. The on-chain naming contracts live in the
+`tosnetwork/tos` tree at `crypto/smartcont/dns/`, ported from the TON
+reference contracts (`ton-blockchain/dns-contract` remains the upstream
+parity source); `tosnetwork/tos-domains` owns the registrar and management
+application. Both still require deployment and acceptance evidence. The auction and renewal rules intentionally follow the current TON
 contracts; Agent-native APIs and production activation are TOS integrations,
 not capabilities inherited from TON.
 
@@ -147,9 +147,12 @@ assumed away by an implementer:
   `capability`, and `messenger` are **not** referenced anywhere in TOS code and
   are proposals of this document (§7).
 - **There is no deployed TOS-adapted production `.tos` collection or domain
-  item.** The established `tosnetwork/dns-contract` repository is currently an
-  unmodified fork whose README and contracts still describe the `.ton` zone.
-  `crypto/smartcont/` contains only `dns-manual-code.fc` and `dns-auto-code.fc`.
+  item.** The ported `.tos` sources live in-tree at `crypto/smartcont/dns/`:
+  the Root is adapted to the single `.tos` zone, the Collection and Item are
+  unchanged from the pinned upstream commit, and the launch timestamp is a
+  localnet placeholder pending governance (§6.6). Nothing is deployed.
+  Elsewhere `crypto/smartcont/` contains only `dns-manual-code.fc` and
+  `dns-auto-code.fc`.
   The DNS collection and item sources under
   `crypto/func/auto-tests/legacy_tests/dns-collection/` and
   `.../tele-nft-item/` are **FunC compiler test fixtures inherited from TON**.
@@ -187,7 +190,7 @@ Two precisions, because both are easy to state wrongly:
   the three target addresses in storage. A `.tos` Root is therefore a
   source-level adaptation of that contract, not a data configuration of the TON
   Root. It is still not a *core* change: the Root is an ordinary masterchain
-  contract owned by `dns-contract`.
+  contract maintained under `crypto/smartcont/dns/`.
 - **The one upstream feature that would require a core change is ConfigParam 80**
   (§6.6). Launching `.tos` does not need it, and v1 does not depend on it.
 
@@ -196,7 +199,7 @@ confused with TOS policy:
 
 | Profile | Purpose | Required repositories | Effect on `tos` core |
 |---|---|---|---|
-| **Baseline port** | Prove that the TON reference Root/Collection/Item model can register and resolve `.tos` on a TOS localnet | `dns-contract`, `TIP`, deployment configuration, one inspection client | No consensus or TVM change. Use existing generic configuration tooling where it is sufficient; add only missing parameter-4 deployment scripts or confirmed boundary fixes. |
+| **Baseline port** | Prove that the TON reference Root/Collection/Item model can register and resolve `.tos` on a TOS localnet | `tos` (`crypto/smartcont/dns/`), `TIP`, deployment configuration, one inspection client | No consensus or TVM change. Use existing generic configuration tooling where it is sufficient; add only missing parameter-4 deployment scripts or confirmed boundary fixes. |
 | **TOS production profile** | Keep the upstream auction/lifecycle contract unchanged while adding code-hash publication, resolver provenance, safe lifecycle interpretation, and Agent-native integrations | Baseline repositories plus `tos-domains`, wallets, explorer, service and Messenger repositories | No consensus or TVM change. Client/API hardening is gated independently from contract parity. |
 
 The baseline port is an engineering compatibility milestone, not a public
@@ -207,11 +210,11 @@ code-hash publication, and Agent-native records remain TOS integrations.
 
 Repository ownership follows the same boundary:
 
-- `tosnetwork/dns-contract` owns Root, Collection, Domain Item, auction,
-  lifecycle, contract build artifacts, and contract tests;
-- `tosnetwork/tos` owns only inherited platform primitives, parameter-4
-  activation support, generally useful resolver/API fixes, SDKs, and operator
-  tooling; and
+- `crypto/smartcont/dns/` in `tosnetwork/tos` owns Root, Collection, Domain
+  Item, auction, lifecycle, contract build artifacts, and contract tests;
+- the rest of `tosnetwork/tos` owns only inherited platform primitives,
+  parameter-4 activation support, generally useful resolver/API fixes, SDKs,
+  and operator tooling; and
 - `tosnetwork/tos-domains` is a non-custodial application and never defines
   protocol bytes independently of the TIP and shared vector corpus.
 
@@ -436,16 +439,16 @@ invent additional mutation authority.
 ### 5.2 `.tos` collection and registrar
 
 The `.tos` collection is a direct TOS deployment of the latest reviewed
-`ton-blockchain/dns-contract` Collection contract. At the time of this review,
-`tosnetwork/dns-contract:main` and `ton-blockchain/dns-contract:main` are
-identical at commit `d08131031fb659d2826cccc417ddd9b98476f814`
-("Merge pull request #2 from ton-blockchain/root2", 2022-10-30), verified
-file-by-file: `nft-item.fc`, `nft-collection.fc`, `root-dns.fc`, and
-`dns-utils.fc` have identical blob hashes in both repositories, and upstream has
+`ton-blockchain/dns-contract` Collection contract. The in-tree port at
+`crypto/smartcont/dns/` is pinned to upstream commit
+`d08131031fb659d2826cccc417ddd9b98476f814`
+("Merge pull request #2 from ton-blockchain/root2", 2022-10-30); upstream has
 only the single branch `main` plus the tags `v1.0`, `root-v1.0`, and
-`root-v1.1`. The fork carries no TOS commits yet. Before any implementation
-commit, the TOS fork must recompare against upstream `main` and incorporate
-newer compatible fixes first.
+`root-v1.1`. In the port, `nft-item.fc` and `nft-collection.fc` are
+byte-identical to upstream; `root-dns.fc` is adapted to the single `.tos`
+zone; and `dns-utils.fc` differs only by moving `auction_start_time` into
+`tos-config.fc`. Before every release, the port must recompare against
+upstream `main` and incorporate newer compatible fixes first.
 
 The collection:
 
@@ -661,9 +664,9 @@ reason to change the upstream contract ABI.
 ### 6.1 Compatibility rule
 
 The `.tos` auction and lifecycle contract must track the current official TON
-DNS contract, rather than introduce a TOS-specific auction protocol. At the time
-of this design, `tosnetwork/dns-contract:main` and
-`ton-blockchain/dns-contract:main` point to the same commit,
+DNS contract, rather than introduce a TOS-specific auction protocol. The
+`.tos` port under `crypto/smartcont/dns/` is pinned to upstream
+`ton-blockchain/dns-contract` commit
 `d08131031fb659d2826cccc417ddd9b98476f814`. Before every DNS contract release,
 CI must fetch the current upstream branch, produce a source and generated-code
 parity report, and require an explicit review for every difference.
@@ -1231,7 +1234,7 @@ Implementations must address at least these threats:
 - **upgrade substitution:** *required policy, not a required consensus
   feature.* TOS has no DNS-specific code-hash registry (§3.1), and it does not
   need to generalize the AIPoW-specific ConfigParam 93 merely to ship DNS.
-  Before activation the TIP and `dns-contract` release manifest must pin and
+  Before activation the TIP and the `crypto/smartcont/dns/` release manifest must pin and
   version the reproducible code hashes for the root, collection, and item and
   define client acceptance rules. Because item code participates in StateInit,
   a code change requires a new Collection and an explicit migration plan. An
@@ -1259,7 +1262,7 @@ map; implementing only the smart contracts is not a complete `.tos` product.
 | Repository | Required coding work | Acceptance evidence |
 |---|---|---|
 | `tosnetwork/TIP` | Publish the normative TOS DNS interface, category registry, lifecycle, operation codes, and canonical vectors | Accepted TIP with frozen hashes and compatibility rules |
-| `tosnetwork/dns-contract` (**established; forked from `ton-blockchain/dns-contract`**) | Track the latest official Root, Collection, Domain Item, auction/renewal logic, and tests. Make only reviewed deployment adaptations for `.tos`, TOS addresses, launch time, and approved TOS-denominated constants; continuously report the remaining upstream diff | Upstream-parity CI; deterministic builds and published code hashes; exact 105% bid, one-hour extension, refund, lazy-finalization, and 366-day release tests; local multi-validator lifecycle evidence |
+| `tosnetwork/tos` (`crypto/smartcont/dns/`, **ported from `ton-blockchain/dns-contract`**) | Track the latest official Root, Collection, Domain Item, auction/renewal logic, and tests. Make only reviewed deployment adaptations for `.tos`, TOS addresses, launch time, and approved TOS-denominated constants; continuously report the remaining upstream diff | Upstream-parity CI; deterministic builds and published code hashes; exact 105% bid, one-hour extension, refund, lazy-finalization, and 366-day release tests; local multi-validator lifecycle evidence |
 | `tosnetwork/tos` (confirmed generic fixes) | Fix independently reproducible inherited defects: set `get_default_max_name_size()` to 126 (`ManualDns.h:193`); correct the `min(qdomain.size(), 126)` consumed-bit cap (`lite-client.cpp:1958`); make `getTokenData` `uint256`-safe for hashed indices (`json-rpc-server-token.cpp:318, 368`). These are generic correctness fixes, not evidence that `.tos` requires a consensus fork | Boundary vectors from §4.2 passing in C++; a JSON-RPC test asserting a full 256-bit index round-trips as a decimal string; no consensus-state change |
 | `tosnetwork/tos` (production-profile client hardening) | For production clients, add a uniform eight-hop limit and cycle detection to Lite Client, Toslib, `toslib-cli`, and `rldp-http-proxy` (§8); pin every hop to one checkpoint (`ToslibClient.cpp:5468`); bound the proxy cache and make it auction/renewal-aware (§8.2); emit the structured provenance result of §8 | Each change has an independent test and can land without the DNS contracts; hop/cycle, lifecycle cache invalidation, and checkpoint consistency evidence |
 | `tosnetwork/tos` (configuration and activation) | First prove whether existing generic genesis and Config Contract proposal tooling can set parameter 4. Add only the missing `config.dns_root!` helper, proposal wrapper, and localnet scripts demonstrated necessary by that exercise. Treat adding parameter 4 to `critical_params` as an explicit mainnet governance decision, not a prerequisite for the baseline port | A localnet booted with parameter 4 set from genesis and, if governance activation is selected, one where parameter 4 is introduced by proposal; evidence that clients fail closed while it is absent; a recorded decision on critical-parameter policy |
@@ -1273,7 +1276,7 @@ map; implementing only the smart contracts is not a complete `.tos` product.
 | `tosnetwork/toscan` | Index domain NFTs, auctions, top-ups, records, transfers, releases, and re-auctions; provide forward-confirmed reverse lookup and domain pages | Reorg-safe index tests, raw-address display, checkpoint provenance, and localnet lifecycle coverage |
 | `tosnetwork/ios` | Resolve names for send/contact flows and manage domain NFTs with explicit address/network/auction/renewal confirmation | Unit, UI, signer, and testnet lifecycle tests |
 | `tosnetwork/android` | Match the iOS resolver, send protection, and domain-management behavior without trusting inherited TON APIs | Cross-platform vectors, UI tests, and TOS-native API boundary tests |
-| `tosnetwork/tos-domains` (**established; currently empty**) | Provide the public registrar and management web application; use wallet signing and chain APIs without holding owner keys, and consume the upstream-compatible ABI and shared vectors rather than redefining auction rules in the frontend | Public bid/refund/finalization recovery UX, transaction-state recovery, overdue-name warnings, phishing defenses, CSP/security review, shared-vector parity, and testnet acceptance |
+| `tosnetwork/tos-domains` (**established**) | Provide the public registrar and management web application; use wallet signing and chain APIs without holding owner keys, and consume the upstream-compatible ABI and shared vectors rather than redefining auction rules in the frontend | Public bid/refund/finalization recovery UX, transaction-state recovery, overdue-name warnings, phishing defenses, CSP/security review, shared-vector parity, and testnet acceptance |
 | `tosnetwork/toscan` (lifecycle indexing) | Keep ownership and record history by Domain Item address plus transaction logical time, and expose active auction, last top-up, derived renewal deadline, release, and re-auction transitions | An index test that owns a name, lets it become releasable, re-auctions it to a different owner at the same address, and keeps historical and current rows separate |
 | shared vector corpus (owned by `tosnetwork/TIP`, consumed everywhere) | Publish one versioned corpus covering §4.2 boundaries, category hashes, `slice_hash` item-index and item-address derivation, bid thresholds, auction durations, renewal deadlines, and the adversarial cases of §13 | The corpus is consumed unmodified by C++, Go, Swift, Kotlin, and TypeScript, and a corpus change fails every consumer build until re-reviewed |
 | `tosnetwork/doc` | Maintain this architecture, operator runbooks, category registry links, deployment addresses, and code hashes | Documentation review tied to released commits and deployed network parameters |
@@ -1296,8 +1299,9 @@ map; implementing only the smart contracts is not a complete `.tos` product.
 
 ### Phase 0 — upstream parity and specification freeze
 
-1. Configure `dns-contract` with the official TON repository as upstream and
-   add CI that reports commit, source, generated-code, and ABI differences.
+1. Track the official TON repository as the upstream of
+   `crypto/smartcont/dns/` and add CI that reports commit, source,
+   generated-code, and ABI differences.
 2. Prove parameter-4 activation through existing generic TOS tooling before
    adding specialized Core helpers.
 3. Publish the TIP, category registry, exact inherited auction/lifecycle rules,
@@ -1482,12 +1486,13 @@ TOS documents:
 - [ai-inference-sharing-tos-domains.md](ai-inference-sharing-tos-domains.md)
 - [TOS Agent-native Messenger architecture](https://github.com/tosnetwork/tos-service-spec/blob/main/docs/AGENT_NATIVE_MESSENGER_V1.md)
 
-TOS repositories established for this work:
+TOS code locations established for this work:
 
-- [tosnetwork/dns-contract](https://github.com/tosnetwork/dns-contract) — fork of
-  `ton-blockchain/dns-contract`; owns the on-chain naming product
+- [tosnetwork/tos `crypto/smartcont/dns/`](https://github.com/tosnetwork/tos/tree/main/crypto/smartcont/dns)
+  — the `.tos` on-chain naming contracts, ported from
+  `ton-blockchain/dns-contract`
 - [tosnetwork/tos-domains](https://github.com/tosnetwork/tos-domains) — registrar
-  and management application; currently empty
+  and management application
 
 Inherited design references:
 
