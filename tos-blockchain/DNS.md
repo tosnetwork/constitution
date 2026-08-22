@@ -1268,18 +1268,29 @@ The code exists on review branches and is **not evidence of mainnet deployment**
   and checkpoint-bound indexer support;
 - `tos-service-spec`, `tos-service-protocol`, and `tos-service-gateway` implement
   the alias authority boundary and bounded read-only Native resolution;
-- TOSCan, iOS, and Android contain the index/display or wallet-send integration;
+- `tos-messenger` accepts `.tos` contact input through the `messenger` category,
+  independently rechecks quorum/checkpoint/lifecycle/Registry identity, reduces
+  the result to an Agent ID, and then executes its existing finalized
+  delegation -> DHT locator -> Contact Descriptor -> prekey chain; the
+  cross-repository Connect test and transfer/substitution boundary tests pass;
+- TOSCan contains the lifecycle index/display integration. The iOS and Android
+  review branches now contain TOS-native registration, public-auction recovery
+  by canonical name, minimum valid bid, lazy finalization, owner top-up,
+  release/re-auction, wallet-record set/delete, and inherited NFT transfer;
+  every mutating path refreshes checkpoint-bound Item identity, lifecycle,
+  owner, target, and amount before signing. Android batch renewal performs the
+  same preflight per Item so an expired name cannot silently turn a renewal
+  into a bid;
 - OpenFox accepts reviewed Agent/Capability name input only as discovery evidence
   and rebinds purchases to Native IDs; and
 - C++, Go, Swift, Kotlin, and TypeScript consume byte-identical copies of the
   canonical TIP-1 corpus (SHA-256
   `0be96a53ff891ee68262d19288d47b2a656d51d2340288b51759e585731eab5e`).
 
-Remaining release work is narrower but security-critical: independent contract
-review, two-builder reproducibility, public testnet lifecycle/signing/UI
-evidence, operating runbooks, and final merge/release/deployment decisions.
-Messenger integration is
-owned by its separate implementation stream. `tos-homepage` stays unchanged
+Remaining release work is narrower but security-critical: obtain iOS/macOS CI,
+mobile UI/signer/hardware-wallet and public-testnet lifecycle evidence,
+independent contract review, two-builder reproducibility, operating runbooks,
+and final merge/release/deployment decisions. `tos-homepage` stays unchanged
 until a deployed, supported network capability exists.
 
 | Repository | Required coding work | Acceptance evidence |
@@ -1294,11 +1305,11 @@ until a deployed, supported network capability exists.
 | `tosnetwork/tos-service-spec` | Specify how `.tos` aliases may identify Agent, Capability, and Messenger entry points without changing `tos_service_v1` authority | Normative boundary text, negative cases, and shared vectors; no alternate registry semantics |
 | `tosnetwork/tos-service-protocol` | Add a Go resolver/verifier library that consumes finalized TOS state, reproduces canonical encoding and category hashes, returns provenance, checks auction/renewal state, and resolves an alias to an address and then to a Native object ID with the §7.1 re-derivation before existing verification; extend `api/tos/service/v1/native.proto` and regenerate `gen/` for any resolution response crossing the Connect boundary | Cross-language vector parity; results labelled `quorum_agreed`, never `proof`; cycle/lifecycle/reorg tests; generated-code and API-compatibility checks |
 | `tosnetwork/tos-service-gateway` | Expose bounded read-only resolution and verified aliases in discovery results; cache only within checkpoint and auction/renewal bounds | Gateway restart/cache tests and proof that a Gateway cannot create or mutate name or Native authority |
-| `tosnetwork/tos-messenger` | Accept `.tos` contact input, reject auctioning or overdue items, resolve `messenger` to an Agent, then execute the existing finalized delegation -> DHT locator -> Contact Descriptor checks; persist IDs rather than names | Substitution, stale delegation, name transfer, re-auction/overdue state, DHT rotation, and three-transport replay tests |
+| `tosnetwork/tos-messenger` | ✅ Implemented on `agent/tos-dns-v1` (`8566051`): accept `.tos` contact input, reject auctioning or overdue items, resolve `messenger` to an Agent, independently recheck Native identity, then execute the existing finalized delegation -> DHT locator -> Contact Descriptor -> prekey checks; persist IDs rather than names | Messenger substitution, name-transfer, re-auction/overdue, hop/cycle, deterministic-address and real Connect-boundary tests pass; existing directory rotation/revocation and ID-bound transport replay suites remain authoritative |
 | `tosnetwork/openfox` | Add name input/display at the human boundary while binding sessions, policy, purchases, and execution to resolved Agent/Capability IDs | Name-transfer and stale-cache tests proving no session or purchase authority follows an old alias |
 | `tosnetwork/toscan` | Index domain NFTs, auctions, top-ups, records, transfers, releases, and re-auctions; provide forward-confirmed reverse lookup and domain pages | Reorg-safe index tests, raw-address display, checkpoint provenance, and localnet lifecycle coverage |
-| `tosnetwork/ios` | Resolve names for send/contact flows and manage domain NFTs with explicit address/network/auction/renewal confirmation | Unit, UI, signer, and testnet lifecycle tests |
-| `tosnetwork/android` | Match the iOS resolver, send protection, and domain-management behavior without trusting inherited TON APIs | Cross-platform vectors, UI tests, and TOS-native API boundary tests |
+| `tosnetwork/ios` | ✅ Coded on `agent/tos-dns-v1`: resolve names for send/contact flows; register and recover public auctions by canonical name; bid/finalize/top-up/release; set/delete wallet records; reuse inherited NFT transfer; refresh checkpoint-bound lifecycle and identity before signing; display name, raw target, network, amount, and checkpoint age in auction confirmation | Swift unit vectors are present; macOS CI, UI/signer automation, hardware-wallet coverage, and public-testnet lifecycle evidence remain release gates |
+| `tosnetwork/android` | ✅ Coded on `agent/tos-dns-v1`: match the iOS resolver and management behavior through TOS-native JSON-RPC; preflight single and batch renewal; expose registration and public-auction recovery even before the Item belongs to the wallet | Kotlin operation/planner/resolver tests and debug Kotlin build pass locally; UI/signer automation, hardware-wallet coverage, and public-testnet lifecycle evidence remain release gates |
 | `tosnetwork/tos` (`domains/`, **established**) | Provide the public registrar and management web application; use wallet signing and chain APIs without holding owner keys, and consume the upstream-compatible ABI and shared vectors rather than redefining auction rules in the frontend | Public bid/refund/finalization recovery UX, transaction-state recovery, overdue-name warnings, phishing defenses, CSP/security review, shared-vector parity, and testnet acceptance |
 | `tosnetwork/toscan` (lifecycle indexing) | Keep ownership and record history by Domain Item address plus transaction logical time, and expose active auction, last top-up, derived renewal deadline, release, and re-auction transitions | An index test that owns a name, lets it become releasable, re-auctions it to a different owner at the same address, and keeps historical and current rows separate |
 | shared vector corpus (owned by `tosnetwork/TIP`, consumed everywhere) | Publish one versioned corpus covering §4.2 boundaries, category hashes, `slice_hash` item-index and item-address derivation, bid thresholds, auction durations, renewal deadlines, and the adversarial cases of §13 | The corpus is consumed unmodified by C++, Go, Swift, Kotlin, and TypeScript, and a corpus change fails every consumer build until re-reviewed |
@@ -1358,11 +1369,11 @@ until a deployed, supported network capability exists.
 
 ### Phase 3 — Agent-native integration
 
-1. Add service-protocol and Gateway alias resolution.
-2. Add Messenger and OpenFox contact resolution.
-3. Prove that name transfer, overdue state, active re-auction, stale caches,
+1. [x] Add service-protocol and Gateway alias resolution.
+2. [x] Add Messenger and OpenFox contact resolution.
+3. [x] Prove that name transfer, overdue state, active re-auction, stale caches,
    revoked delegations, and tombstoned Capabilities all fail closed.
-4. Consume the same vectors in C++, Go, Swift, Kotlin, and TypeScript.
+4. [x] Consume the same vectors in C++, Go, Swift, Kotlin, and TypeScript.
 
 ### Phase 4 — mainnet activation gates
 
