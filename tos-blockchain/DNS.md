@@ -1134,14 +1134,25 @@ invalidates every entry derived from the affected subtree:
 | trusted finalized checkpoint moved backwards (reorg) | every entry resolved at or after the abandoned checkpoint |
 
 **Current state of the one cache that exists.** `rldp-http-proxy/DNSResolver`
-is bounded at 1024 entries with expired-first eviction, reads the answering
-item's `get_auction_info` and `get_last_fill_up_time` before serving or
-caching a record (failing closed on auctioning, unfinalized, overdue, or
-unverifiable names), and caps every entry's lifetime at the derived renewal
-deadline, evicting a cached name the moment a refresh sees an unhealthy
-lifecycle. It does not yet learn of record updates or checkpoint changes
-mid-lifetime beyond its base 300-second expiry; record-update and
-reorg-driven invalidation remain open work in the `tos` row of §11.
+is bounded at 1024 entries with expired-first eviction. It identifies the
+Domain Item as the third canonical `.tos` resolver hop (never blindly as the
+last hop, which may be an owner-controlled delegate), verifies through
+`get_nft_data` that the item belongs to the Collection in the preceding hop,
+and loads that item with `withBlock` at `dns.resolved.block_id`. It then reads
+the item's collection and `uint256` index from `get_nft_data`, requiring them
+to match the preceding Collection and the canonical second-level label's
+`slice_hash`, before reading `get_auction_info` and `get_last_fill_up_time`.
+It fails closed on auctioning, unfinalized, overdue, malformed, or unverifiable
+names. Every successful
+`smc.load` is paired with exactly one `smc.forget`, including all asynchronous
+error exits. Cache lifetime is capped at the derived renewal deadline and an
+unhealthy refresh immediately evicts the old entry.
+
+Equal in-flight lookups are coalesced; the proxy retains at most 256 distinct
+host lookups and 64 waiting callers per host. It does not yet learn of record
+updates or checkpoint changes mid-lifetime beyond its base 300-second expiry;
+record-update and reorg-driven invalidation remain open work in the `tos` row
+of §11.
 
 ### 8.3 Reverse lookup
 
