@@ -1,6 +1,6 @@
 # TOS DNS and `.tos` Naming System
 
-- **Status:** Proposed architecture for review
+- **Status:** TIP-1 implementation candidate; not deployed on mainnet
 - **Target:** TOS mainnet and test networks
 - **Canonical public suffix:** `.tos`
 
@@ -9,7 +9,7 @@ resolver primitives exist. The on-chain naming contracts live in the
 `tosnetwork/tos` tree at `crypto/smartcont/dns/`, ported from the TON
 reference contracts (`ton-blockchain/dns-contract` remains the upstream
 parity source); the registrar and management application lives in the same
-tree at `domains/`. Both still require deployment and acceptance evidence. The auction and renewal rules intentionally follow the current TON
+tree at `domains/`. Both still require deployment and mainnet acceptance evidence. The auction and renewal rules intentionally follow the current TON
 contracts; Agent-native APIs and production activation are TOS integrations,
 not capabilities inherited from TON.
 
@@ -130,30 +130,29 @@ assumed away by an implementer:
   zero state, `block::Config::get_dns_root_addr()`
   (`crypto/block/mc-config.cpp:869`) returns
   `configuration parameter 4 ... is absent` and every client-side resolution
-  fails closed. A governance action is required on an existing network. Whether
-  new genesis/proposal code is required is not yet established: Phase 0 first
-  exercises the generic Config Contract and zero-state tooling, then adds only
-  the wrappers or helpers that the evidence shows are missing.
-- **Parameter 4 is neither mandatory nor critical.** The genesis lists are
+  fails closed. A governance action is required on an existing network. Both
+  genesis pinning and a validator-voted Config Contract activation have now
+  been rehearsed on localnet; no DNS-specific consensus mechanism was needed.
+- **Parameter 4 is critical but not mandatory in the TIP-1 candidate.** The genesis lists are
   `mandatory_params = (0 1 9 10 12 14 15 16 17 18 20 21 22 23 24 25 28 34)` and
-  `critical_params = (-999 -1000 -1001 0 1 3 9 10 12 14 15 16 17 32 34 36)`
+  `critical_params = (-999 -1000 -1001 0 1 3 4 9 10 12 14 15 16 17 32 34 36)`
   (`gen-zerostate.fif:208-209`); the validator-side mandatory list is
   `{18, 20, 21, 22, 23, 24, 25, 28, 34}` (`crypto/block/block.cpp:1885`).
-  Parameter 4 appears in none of them, so replacing the entire `.tos` root
-  resolver would today pass under the *ordinary* proposal setup
-  `(2 3 2 2 ...)` rather than the critical setup `(4 7 4 2 ...)`. See §5.1.
-- **Only two category constants are pinned by code.**
+  Parameter 4 remains optional so a missing DNS root is a supported fail-closed
+  network state, but replacing a present root uses the critical proposal setup.
+  See §5.1.
+- **TIP-1 freezes the complete category registry.**
   `sha256("dns_next_resolver")` is fixed in
   `crypto/smc-envelope/ManualDns.h:34`, `crypto/smartcont/dns-manual-code.fc:347`
   and `crypto/smartcont/dns-auto-code.fc:480`; `sha256("site")` is fixed in
-  `rldp-http-proxy/DNSResolver.cpp:69`. `wallet`, `storage`, `text`, `agent`,
-  `capability`, and `messenger` are **not** referenced anywhere in TOS code and
-  are proposals of this document (§7).
+  `rldp-http-proxy/DNSResolver.cpp:69`. TIP-1 additionally freezes `wallet`,
+  `storage`, `text`, `agent`, `capability`, and `messenger`; consumers use the
+  shared corpus rather than independently spelling or hashing them (§7).
 - **There is no deployed TOS-adapted production `.tos` collection or domain
   item.** The ported `.tos` sources live in-tree at `crypto/smartcont/dns/`:
   the Root is adapted to the single `.tos` zone, the Collection and Item are
-  unchanged from the pinned upstream commit, and the launch timestamp is a
-  localnet placeholder pending governance (§6.6). Nothing is deployed.
+  unchanged from the pinned upstream commit, and the candidate launch timestamp
+  is `2027-01-01T00:00:00Z` (§6.6). Nothing is deployed.
   Elsewhere `crypto/smartcont/` contains only `dns-manual-code.fc` and
   `dns-auto-code.fc`.
   The DNS collection and item sources under
@@ -406,23 +405,13 @@ therefore no "root data update" or "collection upgrade" surface at all.
 Parameter 4 is the single lever over the whole namespace, which makes the
 governance question below sharper rather than softer.
 
-**Parameter 4 is currently an ordinary-vote parameter.** As shown in §3.1 it
-appears in neither `mandatory_params` nor `critical_params`, so under the
-genesis configuration a proposal that replaces the root resolver clears with
-`min_tot_rounds=2, max_tot_rounds=3, min_wins=2, max_losses=2` — a weaker
-threshold than the one protecting the config, elector, and fee-collector
-addresses (parameters 0, 1, 3). Silently redirecting `.tos` is at least as
-severe as changing the fee collector.
-
-**Decision required before mainnet, not before the baseline port:** governance
-must either add parameter 4 to `critical_params` (ConfigParam 10, itself a
-critical parameter) before or as part of the announced activation sequence, or
-publish and approve an alternative root-protection policy with an equivalent
-threat analysis. The two configuration changes need not be falsely described
-as one atomic proposal if the Config Contract cannot express that operation.
-In every case, clients treat an absent parameter 4 as "DNS unavailable", never
-as "name not found". Until a policy is selected and activated, this document
-makes no claim that the root is governance-protected.
+**TIP-1 decision: parameter 4 is critical but not mandatory.** Redirecting the
+root changes the namespace for every client, so the implementation candidate
+adds 4 to `critical_params`. It deliberately does not make DNS mandatory:
+absence remains a supported state and clients report "DNS unavailable", never
+"name not found". Mainnet activation must deploy the immutable Root and
+Collection first and then introduce parameter 4 through the critical governance
+path (or pin it in a new genesis).
 
 The upstream Collection has no emergency auction pause, and the immutability
 above means none can be added to a deployed instance. Adding one to the source
@@ -849,14 +838,13 @@ The inherited minimum-price curve and auction formulas stay unchanged unless
 TON upstream changes them. Two deployment values nevertheless force an explicit
 decision.
 
-**Launch timestamp.** Upstream hardcodes `auction_start_time = 1659171600`
-(30 July 2022). The two available choices are not equivalent and this document
-does not pick one:
-
-| Option | Effect on a `.tos` launch today |
-|---|---|
-| Keep the upstream timestamp | `months` saturates at 12 and 21, so every first auction opens already at the one-hour minimum duration and every label opens at the fully decayed floor price. Anti-sniping and price discovery still work, but there is no extended launch ramp. |
-| Use a TOS activation timestamp | The upstream algorithm is preserved exactly and its seven-day-to-one-hour ramp and 21-month price decay restart from `.tos` launch. Because the timestamp is a compile-time constant in `dns-utils.fc`, this is an explicit source/code change that produces a different code hash, not a data-only deployment choice. |
+**Launch timestamp — decided.** TIP-1 freezes the candidate timestamp at
+`1798761600` (`2027-01-01T00:00:00Z`). This restarts the unchanged upstream
+seven-day-to-one-hour duration ramp and 21-period price decay for `.tos`.
+Because the timestamp is compiled into the contracts, missing the release gates
+means deferring activation and publishing a replacement TIP, corpus, and
+artifact set with a new timestamp; it does not mean silently launching late
+against stale economics.
 
 **Unit scale is already identical; do not confuse it with an economic change.**
 Upstream `one_ton` and `min_tons_for_storage()` are both `1e9` base units, and
@@ -871,10 +859,10 @@ bid to the Collection as `op::fill_up`, and the upstream Collection handles that
 opcode by doing nothing at all (`if (op == op::fill_up) { return (); }`). It has
 no owner, no admin operation, no withdrawal, and no `set_code`. Proceeds
 therefore accumulate in the Collection's balance permanently — an implicit burn,
-not a treasury. TOS must either accept that explicitly as the v1 economic
-outcome, or acknowledge that adding a proceeds destination is a semantic fork of
-the Collection requiring its own TIP, review, and vectors. A gate that merely
-says "proceeds destination approved" without resolving this is not satisfied.
+not a treasury. TIP-1 explicitly accepts permanent lockup as the v1 economic
+outcome. There is no treasury recipient, withdrawal key, or implied future
+recovery. Adding a proceeds destination is a semantic Collection fork requiring
+a new TIP, review, vectors, Root/Collection deployment, and parameter-4 vote.
 
 Upstream synchronization is continuous, not a one-time port:
 
@@ -916,12 +904,11 @@ The practical consequences, which the design must not blur:
   with no TL-B or validator change, at the cost of an unvalidated parameter
   shape.
 
-Choosing among *no blacklist* (v1 default), *negative index*, and *core-declared
-index 80* is a governance decision that must be recorded before activation, not
-left implicit. Whichever is chosen, tests, wallet warnings, TOSCan, and
-governance runbooks must cover both effects, and TOS must not remove or broaden
-the path silently; any policy change is a reviewed contract diff and a
-governance decision.
+**TIP-1 decision: ConfigParam 80 is absent in v1.** TOS does not declare index
+80 and does not switch the contracts to a negative index. Consequently the
+reservation blacklist and inherited governance transfer/destruction operation
+remain inert. Enabling either later is a new governance and compatibility
+decision with a separate TIP; it cannot be introduced as an operational tweak.
 
 No application repository may redefine bid thresholds, auction timing, renewal
 deadlines, or item-state interpretation. They consume the contract ABI and the
@@ -936,22 +923,20 @@ itself (`lite-client.cpp:2014-2032`, `ManualDns.cpp:539-556`). Version 1 reuses
 the existing TL-B record encodings; new semantics are selected by category
 instead of inventing unnecessary wire types.
 
-The **Status** column distinguishes what is already fixed by TOS code from what
-this document proposes. Only two category hashes exist in the tree today (§3.1);
-every `Proposed` row is a name whose SHA-256 value the TIP must freeze together
-with a vector, because once a record is stored under a hash the name that
-produced it is unrecoverable.
+The **Status** column distinguishes inherited code constants from category
+names frozen by TIP-1. Once a record is stored under a hash, the name that
+produced it is unrecoverable, so every consumer reads the canonical corpus.
 
 | Category name | Status | Record encoding | TOS meaning | Required follow-up verification |
 |---|---|---|---|---|
 | `dns_next_resolver` | **Pinned in code** (`ManualDns.h:34`, `dns-manual-code.fc:347`, `dns-auto-code.fc:480`) | `dns_next_resolver` | Delegated subdomain resolver | Resolver address, cycle, depth, response validation; valid **only** on partial resolution (§5.5) |
 | `site` | **Pinned in code** (`DNSResolver.cpp:69`) | `dns_adnl_address` | TOS Site entry point | ADNL identity and protocol support |
-| `wallet` | Proposed | `dns_smc_address` | Default payment account | Address/network validation and wallet transaction confirmation |
-| `agent` | Proposed | `dns_smc_address` | Finalized Agent account | Address→Agent ID re-derivation (below), live state, controller policy, revocation |
-| `capability` | Proposed | `dns_smc_address` | Finalized Capability account | Address→Capability ID re-derivation, owner Agent, version, revocation/tombstone, manifest, policy |
-| `messenger` | Proposed | `dns_smc_address` | Agent used for Messaging contact | Address→Agent ID re-derivation, then Endpoint delegation, Contact Descriptor, and DHT locator (§9.2) |
-| `storage` | Proposed | `dns_storage_address` | TOS Storage Bag ID | Bag hash/content verification and application policy |
-| `text` | Proposed | `dns_text` | Human-readable presentation metadata | Never authoritative; escape before display |
+| `wallet` | **Frozen by TIP-1** | `dns_smc_address` | Default payment account | Address/network validation and wallet transaction confirmation |
+| `agent` | **Frozen by TIP-1** | `dns_smc_address` | Finalized Agent account | Address→Agent ID re-derivation (below), live state, controller policy, revocation |
+| `capability` | **Frozen by TIP-1** | `dns_smc_address` | Finalized Capability account | Address→Capability ID re-derivation, owner Agent, version, revocation/tombstone, manifest, policy |
+| `messenger` | **Frozen by TIP-1** | `dns_smc_address` | Agent used for Messaging contact | Address→Agent ID re-derivation, then Endpoint delegation, Contact Descriptor, and DHT locator (§9.2) |
+| `storage` | **Frozen by TIP-1** | `dns_storage_address` | TOS Storage Bag ID | Bag hash/content verification and application policy |
+| `text` | **Frozen by TIP-1** | `dns_text` | Human-readable presentation metadata | Never authoritative; escape before display |
 
 **Name collisions with inherited conventions.** `dns_next_resolver` and `site`
 carry their inherited meanings unchanged and must not be redefined.
@@ -1057,15 +1042,15 @@ resolved_at_chain_time
 provenance_class            (see the table below)
 ```
 
-Delivered so far: `dns.resolved` in the toslib API now carries the pinned
-`block_id`, the ordered `resolver_path`, and a `provenance_class`
-(`chain_anchored`), and both `toslib-cli` and the Lite Client print the
-pinned block, hop count, and resolver path; the JS SDK's resolver returns
-the same structure with `provenance_class = "evaluated"`. The remaining
-fields (canonical name, category names, decoded lifecycle/auction state,
-chain time) are still assembled by callers from the underlying get-methods;
-completing the single structured result stays tracked in the `tos` and
-`tos-service-protocol` rows of §11.
+Delivered in the implementation branches: `dns.resolved` in Toslib carries the
+pinned `block_id`, ordered `resolver_path`, and `provenance_class`; Lite Client,
+`toslib-cli`, the JS SDK, and `tosctl domain resolve/inspect --format json`
+expose the corresponding checkpoint and lifecycle evidence. The Go Native
+resolver returns a typed `quorum_agreed` response containing the canonical
+name, record/category binding, resolver path, Domain Item lifecycle, and Native
+object state at one checkpoint. Individual low-level APIs may expose only their
+own assurance class; callers must not relabel `evaluated` or `quorum_agreed` as
+a Merkle proof.
 
 Clients resolving Agent-native objects then perform their protocol-specific
 finalized-state verification. They must use the account address or object ID,
@@ -1268,13 +1253,38 @@ metadata.
 The feature is cross-repository. Completion requires the following ownership
 map; implementing only the smart contracts is not a complete `.tos` product.
 
+### 11.0 Implementation snapshot (2026-08-22)
+
+The code exists on review branches and is **not evidence of mainnet deployment**:
+
+- TIP-1 and `assets/tip-1/dns-v1.json` freeze the candidate policy, hashes,
+  addresses, categories, operations, lifecycle, and auction vectors;
+- `tos` contains the parity-checked contracts, critical-parameter-4 policy,
+  both localnet activation rehearsals, CLI/SDK/resolver hardening, the registrar,
+  and checkpoint-bound indexer support;
+- `tos-service-spec`, `tos-service-protocol`, and `tos-service-gateway` implement
+  the alias authority boundary and bounded read-only Native resolution;
+- TOSCan, iOS, and Android contain the index/display or wallet-send integration;
+- OpenFox accepts reviewed Agent/Capability name input only as discovery evidence
+  and rebinds purchases to Native IDs; and
+- C++, Go, Swift, Kotlin, and TypeScript consume byte-identical copies of the
+  canonical TIP-1 corpus (SHA-256
+  `0be96a53ff891ee68262d19288d47b2a656d51d2340288b51759e585731eab5e`).
+
+Remaining release work is narrower but security-critical: independent contract
+review, two-builder reproducibility, public testnet lifecycle/signing/UI
+evidence, event-driven record/delegation and reorg cache invalidation, operating
+runbooks, and final merge/release/deployment decisions. Messenger integration is
+owned by its separate implementation stream. `tos-homepage` stays unchanged
+until a deployed, supported network capability exists.
+
 | Repository | Required coding work | Acceptance evidence |
 |---|---|---|
 | `tosnetwork/TIP` | Publish the normative TOS DNS interface, category registry, lifecycle, operation codes, and canonical vectors | Accepted TIP with frozen hashes and compatibility rules |
 | `tosnetwork/tos` (`crypto/smartcont/dns/`, **ported from `ton-blockchain/dns-contract`**) | Track the latest official Root, Collection, Domain Item, auction/renewal logic, and tests. Make only reviewed deployment adaptations for `.tos`, TOS addresses, launch time, and approved TOS-denominated constants; continuously report the remaining upstream diff | Upstream-parity CI; deterministic builds and published code hashes; exact 105% bid, one-hour extension, refund, lazy-finalization, and 366-day release tests; local multi-validator lifecycle evidence |
 | `tosnetwork/tos` (confirmed generic fixes) | Fix independently reproducible inherited defects: set `get_default_max_name_size()` to 126 (`ManualDns.h:193`); correct the `min(qdomain.size(), 126)` consumed-bit cap (`lite-client.cpp:1958`); make `getTokenData` `uint256`-safe for hashed indices (`json-rpc-server-token.cpp:318, 368`). These are generic correctness fixes, not evidence that `.tos` requires a consensus fork | Boundary vectors from §4.2 passing in C++; a JSON-RPC test asserting a full 256-bit index round-trips as a decimal string; no consensus-state change |
 | `tosnetwork/tos` (production-profile client hardening) | For production clients, add a uniform eight-hop limit and cycle detection to Lite Client, Toslib, `toslib-cli`, and `rldp-http-proxy` (§8); pin every hop to one checkpoint (`ToslibClient.cpp:5468`); bound the proxy cache and make it auction/renewal-aware (§8.2); emit the structured provenance result of §8 | Each change has an independent test and can land without the DNS contracts; hop/cycle, lifecycle cache invalidation, and checkpoint consistency evidence |
-| `tosnetwork/tos` (configuration and activation) | First prove whether existing generic genesis and Config Contract proposal tooling can set parameter 4. Both activation paths are rehearsed by `scripts/dns-e2e.py`: genesis (`config.dns_root_smc!`, the commented `gen-zerostate.fif` example, the tostester `dns_root_addr` profile) and an ordinary config-change proposal accepted by validator vote on a running localnet. One operational finding stands: the default ConfigVotingSetup (ConfigParam 11) requires multi-round validator-set rotation, so localnet rehearsals opt into a relaxed override. Treat adding parameter 4 to `critical_params` as an explicit mainnet governance decision, not a prerequisite for the baseline port | A localnet booted with parameter 4 set from genesis and, if governance activation is selected, one where parameter 4 is introduced by proposal; evidence that clients fail closed while it is absent; a recorded decision on critical-parameter policy |
+| `tosnetwork/tos` (configuration and activation) | Both activation paths are rehearsed by `scripts/dns-e2e.py`: genesis (`config.dns_root_smc!`, the commented `gen-zerostate.fif` example, the tostester `dns_root_addr` profile) and a config-change proposal accepted by validator vote on a running localnet. Parameter 4 is in the candidate critical list. One operational finding stands: the default ConfigVotingSetup (ConfigParam 11) requires multi-round validator-set rotation, so localnet rehearsals opt into a relaxed override | A localnet booted with parameter 4 set from genesis and one where it is introduced by proposal; evidence that clients fail closed while absent; mainnet uses the critical voting policy |
 | `tosnetwork/tos` (`sdk/js`) | TypeScript resolver, canonicalization, category hashes, item-address derivation, and `uint256` index handling; align `NftCollection.ts` with the TOS-TEP-62 DNS profile | Consumption of the shared vectors in TypeScript; parity with the Go and C++ implementations |
 | `tosnetwork/tos` (`tosctl`) | Add `domain normalize`, `bid`, `auction`, `finish` (sending `op::get_static_data`, per §6.4), `renew/top-up`, `release`, `transfer`, `record set/delete`, `delegate`, `resolve`, and `inspect`, using the inherited message formats with offline signing support | CLI golden vectors, exact bid-boundary and lifecycle interpretation tests, restart-safe transaction tracking, hardware/offline signer tests, and real localnet lifecycle |
 | `tosnetwork/tos-service-spec` | Specify how `.tos` aliases may identify Agent, Capability, and Messenger entry points without changing `tos_service_v1` authority | Normative boundary text, negative cases, and shared vectors; no alternate registry semantics |
@@ -1317,8 +1327,10 @@ map; implementing only the smart contracts is not a complete `.tos` product.
    and the small allowlist of TOS deployment differences.
 4. Freeze normalization, encoding, category hashes, `slice_hash` item index,
    StateInit, operation codes, bid/duration boundary vectors, and code hashes.
-5. Approve the `.tos` launch timestamp, TOS-denominated price constants,
-   proceeds handling, optional reservation policy, and upgrade governance.
+5. Verify that the TIP-1 decisions remain acceptable at release time: the
+   2027-01-01 candidate timestamp, unchanged TON price constants, permanently
+   locked proceeds, absent ConfigParam 80, immutable upgrades, and critical
+   parameter 4. If timing gates slip, revise the timestamp and artifacts first.
 6. Complete threat modeling and independent contract review.
 
 ### Phase 1 — contracts and local tooling
@@ -1359,12 +1371,11 @@ Every gate must be evidenced against a specific commit:
 - **G3 — frozen formats:** the TIP and shared corpus freeze encoding, category
   hashes, `slice_hash` item index, StateInit, ABI, operation codes, exact 105%
   boundary rounding, durations, extension, refund, and release behavior.
-- **G4 — economics:** the launch-timestamp choice of §6.6 is recorded with its
-  consequences; the price tier magnitudes and storage reserve are approved; and
-  the fact that proceeds accumulate irrecoverably in the Collection is either
-  accepted in writing as the v1 outcome or replaced through an approved
-  Collection fork. No alternate auction model is hidden in economics
-  configuration.
+- **G4 — economics:** the 2027-01-01 candidate timestamp is still future at
+  activation (otherwise a replacement TIP/artifact set is published); the
+  inherited price tiers and storage reserve are approved; and permanently
+  locked Collection proceeds are acknowledged. No alternate auction model is
+  hidden in economics configuration.
 - **G5 — implementation review:** two independent reviews cover the registrar
   and item, and an independent resolver reproduces the shared vectors.
 - **G6 — lifecycle evidence:** a public testnet demonstrates registration,
@@ -1376,14 +1387,11 @@ Every gate must be evidenced against a specific commit:
   raw address, network, checkpoint age, auction state, and renewal deadline.
 - **G8 — reorg and cache behavior:** resolvers and indexers roll back abandoned
   checkpoints and invalidate affected name, lifecycle, and delegation caches.
-- **G9 — governance and operations:** the parameter-4 protection decision of
-  §5.1 is active; the ConfigParam 80 choice of §6.6 is recorded, including
-  whether any core change was made and who may add an entry; upgrade notice,
-  incident response, and a public contact path are published. The runbook states
-  that governance destruction deletes the item account but its ConfigParam 80
-  entry continues to block registration until governance removes the entry; a
-  later registration then re-creates fresh state at the same deterministic
-  address.
+- **G9 — governance and operations:** critical protection for parameter 4 is
+  active; ConfigParam 80 remains absent; upgrade notice, incident response, and
+  a public contact path are published. Any future reservation or governance
+  mutation mechanism requires a new TIP and test matrix before a core or
+  negative configuration index is introduced.
 - **G10 — upstream monitoring:** an owner and response SLA are assigned for new
   official TON DNS changes, including expedited handling of security fixes.
 
@@ -1487,6 +1495,7 @@ purchase.
 
 TOS documents:
 
+- [DNS v1 threat model](DNS-THREAT-MODEL.md)
 - [ConfigParam.md](ConfigParam.md)
 - [TosSites.md](TosSites.md)
 - [tos-tep-token-standards.md](tos-tep-token-standards.md)
