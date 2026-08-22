@@ -53,7 +53,7 @@ and displayed aliases are untrusted inputs or replaceable projections.
 | Record survives transfer/release | old owner endpoint remains active | display inheritance; new owner reviews/replaces records; clients still apply lifecycle gate | transfer/re-auction record-retention tests |
 | Name-to-Native substitution | name grants Agent/Capability authority | resolve address, decode typed state, recover ID, re-derive address, then use ID only | mismatch, revoke, tombstone, transfer tests |
 | Cache poisoning/amplification | stale authority or memory exhaustion | checkpoint/lifecycle-keyed bounded cache; 1024 entries; 256 in-flight names; 64 waiters/name; request coalescing | eviction, deadline, concurrency and recovery tests |
-| Reorg or record mutation mid-TTL | stale result remains until TTL | event-driven subtree invalidation and rollback by checkpoint | **open release gate**; integration evidence required |
+| Reorg or record mutation mid-TTL | stale result remains until TTL | full checkpoint identity is polled every five seconds; any forward or same-height hash change clears proxy cache | checkpoint progress/reorg identity tests; optional future subtree invalidation optimization |
 | Registrar phishing/XSS | user signs wrong name/bid/address | lowercase canonical preview, raw payload, network, CSP, no custody, untrusted text escaping | CSP review, signer/UI tests, homograph warnings |
 | Output/token file attack | credential disclosure or evidence overwrite | owner-private regular token file, reject symlink, create evidence with `O_EXCL` mode 0600 | OpenFox CLI unit tests |
 | Supply-chain drift | source/vector/artifact mismatch | pinned TON commit, parity CI, canonical corpus checksum, two independent reproducible builders | parity report and **open two-builder gate** |
@@ -78,9 +78,10 @@ and Contact Descriptor mechanisms carry mutable contact material.
 
 ## 6. Residual risks and release gates
 
-- Event-driven record/delegation invalidation and reorg rollback are not yet
-  implemented for every cache consumer. The current 300-second cap reduces but
-  does not eliminate the stale-result window.
+- Proxy invalidation is deliberately coarse: a verified checkpoint transition
+  clears the whole cache within the five-second sync interval. A future indexed
+  event feed may invalidate only an affected subtree, but must not weaken this
+  correctness fallback.
 - Contract code has not completed an independent review. Authors of this model
   and implementation do not satisfy that requirement.
 - iOS changes have not been compiled on macOS/Xcode in this Linux environment.
@@ -91,4 +92,3 @@ and Contact Descriptor mechanisms carry mutable contact material.
 
 Mainnet activation is blocked until these items and DNS.md gates G1–G10 have
 commit-bound evidence.
-

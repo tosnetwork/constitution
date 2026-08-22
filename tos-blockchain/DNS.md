@@ -1134,10 +1134,14 @@ error exits. Cache lifetime is capped at the derived renewal deadline and an
 unhealthy refresh immediately evicts the old entry.
 
 Equal in-flight lookups are coalesced; the proxy retains at most 256 distinct
-host lookups and 64 waiting callers per host. It does not yet learn of record
-updates or checkpoint changes mid-lifetime beyond its base 300-second expiry;
-record-update and reorg-driven invalidation remain open work in the `tos` row
-of §11.
+host lookups and 64 waiting callers per host. Every five seconds its verified
+Toslib sync compares the full masterchain checkpoint identity (workchain,
+shard, seqno, root hash, and file hash). Any forward checkpoint or same-height
+hash change clears the cache as a unit. Thus finalized record/delegation updates
+and reorganizations invalidate entries within the sync interval instead of
+waiting for the 300-second TTL. This deliberately coarse strategy is safe and
+simple; subtree event provenance is an optional future performance optimization,
+not a correctness dependency.
 
 ### 8.3 Reverse lookup
 
@@ -1273,8 +1277,8 @@ The code exists on review branches and is **not evidence of mainnet deployment**
 
 Remaining release work is narrower but security-critical: independent contract
 review, two-builder reproducibility, public testnet lifecycle/signing/UI
-evidence, event-driven record/delegation and reorg cache invalidation, operating
-runbooks, and final merge/release/deployment decisions. Messenger integration is
+evidence, operating runbooks, and final merge/release/deployment decisions.
+Messenger integration is
 owned by its separate implementation stream. `tos-homepage` stays unchanged
 until a deployed, supported network capability exists.
 
