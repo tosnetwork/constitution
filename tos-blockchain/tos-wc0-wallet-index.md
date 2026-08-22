@@ -1,6 +1,6 @@
 # TOS wc=0 In-Process Wallet Index
 
-Status: in progress (Phase W). Goal: serve wallet "aggregate" queries (jetton list,
+Status: implemented (Phase W). Goal: serve wallet "aggregate" queries (jetton list,
 NFT list, account events) directly from the node, without requiring an external
 wallet indexer.
 
@@ -39,6 +39,24 @@ separate indexer dependency.
   notification/spam transactions at it). Registered in `dispatch_method`.
   Token entries are state-verified at write time (see below); clients still
   resolve live balances via `get_wallet_data` (`runGetMethod`).
+
+## Native token metadata JSON-RPC
+
+`getTokenData(address)` probes a Jetton master, NFT item, or NFT collection at
+the latest masterchain checkpoint. Alongside the raw content BOC, it exposes
+TEP-64 fields directly so mobile clients do not need a TonAPI-compatible
+indexer or a second Cell-dictionary implementation:
+
+- Jetton: `jetton_name`, `jetton_symbol`, `jetton_decimals`, `jetton_image`,
+  `jetton_description`, and `jetton_metadata_uri`.
+- NFT item: `nft_name`, `nft_image`, `nft_description`, and
+  `nft_metadata_uri`.
+- NFT collection: `collection_name`, `collection_image`,
+  `collection_description`, and `collection_metadata_uri`.
+
+On-chain TEP-64 dictionaries (`0x00`) and off-chain URI cells (`0x01`) are
+recognized. The node returns the URI but deliberately does not fetch it: NFT
+media and untrusted off-chain JSON remain client/external concerns.
 
 ## Key schema (`wallet-index.h`)
 
@@ -86,6 +104,14 @@ write to the index directly — they only *nominate candidates*:
   `0x7362d09c` received by O nominates its source.
 - NFT (TEP-62): transfer `0x5fcc3d14` received by N nominates N;
   ownership_assigned `0x05138d91` received by O nominates its source.
+- Contract activation nominates the newly active account for both probes. This
+  covers initial NFT and Jetton-wallet deployment, whose first inbound message
+  can contain `StateInit` plus an application-specific mint body without a
+  standard transfer opcode.
+- Every transaction of a previously verified NFT nominates that item again,
+  independent of opcode. If its post-state no longer proves an owned NFT (for
+  example after DNS expiry, release, freeze, or deletion), the writer removes
+  both the old owner's NFT row and the reverse-owner row in the same batch.
 
 Each candidate is then verified against the **post-apply shard state** by
 executing gas-bounded (1M) TVM get-methods:
