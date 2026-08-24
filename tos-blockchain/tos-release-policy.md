@@ -324,6 +324,10 @@ Before releasing a change to a public surface, ask:
 
 If these questions cannot be answered, the release is not ready for that surface.
 
+For the operational watch items that accompany a release once it is running
+(dark-feature locks, log management, election rollover monitoring, resource
+baselines), see [ops/release-operations-runbook.md](ops/release-operations-runbook.md).
+
 ## Near-Term Default Policy
 
 For the next 12 months, TOS should bias toward:

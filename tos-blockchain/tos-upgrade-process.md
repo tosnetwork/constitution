@@ -17,6 +17,7 @@ This document complements:
 - [tos-release-policy.md](tos-release-policy.md) -- stability levels, compatibility windows, deprecation policy
 - [tos-standards-map.md](tos-standards-map.md) -- which surfaces are standards and who owns them
 - [ai-actors.md](ai-actors.md) -- AI actor workflow direction
+- [ops/release-operations-runbook.md](ops/release-operations-runbook.md) -- operator watch items while the network runs: dark-feature locks, log management, election rollover monitoring, resource baselines
 
 ## 2. Change Categories
 
