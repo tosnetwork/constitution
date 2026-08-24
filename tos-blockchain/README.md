@@ -69,4 +69,5 @@ Review and release docs:
 - [tos-release-policy.md](tos-release-policy.md)
 - [tos-upgrade-process.md](tos-upgrade-process.md)
 - [ops/tos31-tos32-validation.md](ops/tos31-tos32-validation.md)
+- [ops/release-operations-runbook.md](ops/release-operations-runbook.md)
 - [adr/README.md](adr/README.md)
