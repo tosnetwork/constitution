@@ -7,6 +7,11 @@ Version: v1.0
 This document defines the major public standards surfaces for TOS.
 The AI Actor Model in [ai-actors.md](ai-actors.md) is the current product direction for these standards.
 
+These standards are developed within the governance direction of the [Agentic
+Internet Constitution — TOS Founding
+Edition](../AGENTIC_INTERNET_CONSTITUTION.md). Standards may implement
+constitutional principles, but they do not amend the Constitution.
+
 It is not a protocol spec and not a complete API reference.
 It is a map of the surfaces that must become stable enough for ecosystem participants to rely on.
 
@@ -24,6 +29,18 @@ TOS should distinguish clearly between:
 
 Not every implementation detail needs standardization.
 But every surface that serious wallets, operators, applications, explorers, indexers, or infrastructure providers depend on must have a clear stability policy.
+
+A formal standard defines public, observable protocol behavior rather than a
+required source-code lineage. Subject to its explicit license, a third party
+may implement the same standard in an independent repository without importing
+TOS reference code or obtaining discretionary TOS approval. Conformance must be
+judged by the published specification, declared profile, schemas, examples,
+test vectors, and compatibility suite.
+
+Before an open Agentic Internet protocol reaches Level 1, it should demonstrate
+that an independent implementation can interoperate without relying on
+undocumented reference-code behavior. A reference implementation is evidence
+and tooling; it is not a substitute for the normative standard.
 
 ## Stability Levels
 

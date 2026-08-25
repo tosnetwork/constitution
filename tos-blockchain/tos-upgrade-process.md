@@ -6,6 +6,10 @@ Version: v1.0
 
 This document defines how TOS introduces, reviews, stages, deploys, and rolls back changes to protocol behavior, public APIs, and operator-facing surfaces.
 
+It operates within the governance direction of the [Agentic Internet
+Constitution — TOS Founding Edition](../AGENTIC_INTERNET_CONSTITUTION.md). This
+process cannot be used to bypass the Constitution's amendment requirements.
+
 It answers the questions that operators and integrators must be able to resolve before any upgrade:
 
 > What is changing? How will it affect me? How long do I have to prepare? What happens if it goes wrong?
@@ -18,6 +22,11 @@ This document complements:
 - [tos-standards-map.md](tos-standards-map.md) -- which surfaces are standards and who owns them
 - [ai-actors.md](ai-actors.md) -- AI actor workflow direction
 - [ops/release-operations-runbook.md](ops/release-operations-runbook.md) -- operator watch items while the network runs: dark-feature locks, log management, election rollover monitoring, resource baselines
+
+Where a change affects an open Agentic Internet protocol, the proposal and
+staging evidence must be sufficient for independent implementations to detect,
+test, and migrate the change without access to private TOS implementation
+details.
 
 ## 2. Change Categories
 

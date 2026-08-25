@@ -6,6 +6,10 @@ Version: v1.0
 
 This document defines the release discipline for TOS public surfaces.
 
+It operates within the governance direction of the [Agentic Internet
+Constitution — TOS Founding Edition](../AGENTIC_INTERNET_CONSTITUTION.md).
+Applying this release policy does not ratify or amend that Constitution.
+
 It is not a changelog and not a protocol spec.
 It is the policy that governs how TOS introduces, stabilizes, changes, deprecates, and removes ecosystem-facing behavior.
 
@@ -28,6 +32,11 @@ Every ecosystem-facing surface should have:
 - an explicit owner
 
 If a surface does not have these, it should not be treated as stable.
+
+For a surface presented as an open Agentic Internet protocol, compatibility
+obligations apply equally to independent implementations. A release must not
+make conformance depend on an undisclosed TOS code path, private test, reserved
+wire behavior, or discretionary approval unavailable to third parties.
 
 ## Release Surface Types
 

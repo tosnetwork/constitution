@@ -5,6 +5,12 @@ the TOS Blockchain. The repository's canonical scope is the base layer:
 consensus, sharding, native TVM execution, networking, cryptography, node
 operation, and developer tooling.
 
+The [Agentic Internet Constitution — TOS Founding
+Edition](../AGENTIC_INTERNET_CONSTITUTION.md) provides the broader governance
+context for this documentation set. Exact protocol specifications, deployed
+code, and observable chain state remain the operational authorities for
+blockchain behavior.
+
 Additional research:
 
 - [agi.tex](agi.tex) - AGI Futures and the On-Chain Agent Economy: a long-range,
