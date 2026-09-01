@@ -64,19 +64,19 @@ from any future service-actor pricing rules.
 resolver. Clients hard-code the masterchain: the value is an account id, not a
 full address, and resolution always starts at `-1:<dns_root_addr>`.
 
-The parameter is **unset by default** and every DNS client fails closed while
-it is absent: lite-client reports that it cannot obtain the root from
-parameter 4, and toslib refuses root-based resolution. It is an ordinary
-(non-critical) parameter unless governance adds it to `critical_params`
-(ConfigParam 10) — a deliberate mainnet decision, not a default.
+The canonical mainnet zero-state pins the reproducible TIP-1 Root account id.
+DNS clients fail closed if the parameter is absent and also fail closed while
+the pinned Root account has not been deployed. Parameter 4 is listed in
+`critical_params` (ConfigParam 10), but remains non-mandatory so an explicitly
+configured recovery/test network may represent DNS as unavailable.
 
 Setting it:
 
-- **Genesis**: `config.dns_root_smc!` in `crypto/fift/lib/Config.fif` (a
-  commented example sits in `crypto/smartcont/gen-zerostate.fif`). Local test
-  networks pin it through `NetworkConfig.dns_root_addr` in the tostester
-  zerostate generator.
-- **Post-genesis**: an ordinary config-change proposal through the
+- **Genesis**: the production `crypto/smartcont/gen-zerostate.fif` invokes
+  `config.dns_root_smc!` with the account id in the shared TIP-1 vectors.
+  Local test networks pin the same value by default and may override it with
+  `NetworkConfig.dns_root_addr` for a reviewed local contract profile.
+- **Post-genesis**: a critical config-change proposal through the
   configuration contract, accepted by validator vote (rehearsed end to end
   by `scripts/dns-e2e.py`). Note that proposal acceptance is governed by
   ConfigParam 11 (ConfigVotingSetup): with the default values a proposal
@@ -86,7 +86,8 @@ Setting it:
 - The pinned value may be the **counterfactual** address of a root deployed
   later; clients keep failing closed until the account actually exists.
   `scripts/dns-e2e.py` demonstrates the full flow (pin at genesis, deploy at
-  runtime, resolve).
+  runtime, resolve). The production launch ceremony must verify that the
+  deployed StateInit hashes to the account id already committed in genesis.
 
 The root contract itself is immutable (no owner, no upgrade path), so
 repointing the `.tos` zone means deploying a new root and changing this

@@ -19,7 +19,7 @@ these stay dark**. Each is held by a different kind of lock:
 | Feature | Lock | Operator rule |
 |---|---|---|
 | AIPoW issuance | `capAipow` unset + ConfigParam 90–93 absent + contracts undeployed | Never vote these on outside a planned activation |
-| TOS DNS | ConfigParam 4 absent | Absence is intentional; clients fail closed |
+| TOS DNS | ConfigParam 4 pins the audited TIP-1 Root; Root/Collection initially undeployed; registration time-gated | Deploy only the byte-identical release artifacts during the launch ceremony; any root change is critical governance |
 | Native Registry | Registry contract undeployed (SHA256C opcode itself is live at version 14) | Do not deploy registry code outside a planned activation |
 | Cross-chain bridge | No ConfigParam, no genesis deployment, no production oracle set | See §6 before any deployment |
 | Pooled staking | ConfigParam 17 `max_stake_factor = 1` | Raising it is a governance action gated on validator count |
@@ -29,9 +29,10 @@ Operator consequences:
 - Treat any config-parameter vote touching these locks as a **protocol
   activation**, not a routine parameter change. Activation requires a
   frozen-version external audit covering that feature first.
-- Alert on unexpected appearance of ConfigParam 4, 90–93, or changes to
-  ConfigParam 17. On this network, "parameter appeared" equals "feature went
-  live".
+- Alert on any ConfigParam 4 value differing from the published zero-state,
+  unexpected appearance of 90–93, or changes to ConfigParam 17. A Param 4
+  change redirects the namespace even when the replacement Root is not yet
+  deployed.
 - The config-master key can change these parameters unilaterally, bypassing
   the validator vote. That key must sit under the same custody discipline as
   the genesis/minter keys (multisig or time-lock, documented key ceremony).

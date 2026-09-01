@@ -121,18 +121,16 @@ review.
 The following statements were verified against the working tree and must not be
 assumed away by an implementer:
 
-- **Configuration parameter 4 is unset at genesis by default.**
-  `crypto/fift/lib/Config.fif` now provides `config.dns_root_smc!` and
-  `tos/crypto/smartcont/gen-zerostate.fif` carries a commented activation
-  example, but no genesis profile enables it; local test networks may pin it
-  through the tostester zerostate generator (`NetworkConfig.dns_root_addr`,
-  exercised by `scripts/dns-e2e.py`). On a network built from the default
-  zero state, `block::Config::get_dns_root_addr()`
-  (`crypto/block/mc-config.cpp:869`) returns
-  `configuration parameter 4 ... is absent` and every client-side resolution
-  fails closed. A governance action is required on an existing network. Both
-  genesis pinning and a validator-voted Config Contract activation have now
-  been rehearsed on localnet; no DNS-specific consensus mechanism was needed.
+- **The canonical mainnet zero-state pins configuration parameter 4.**
+  `crypto/smartcont/gen-zerostate.fif` stores the account id from the
+  reproducible TIP-1 Root vector (`-1:280e2d46...9a32`). This is a
+  counterfactual address: clients still fail closed until the exact audited
+  Root StateInit and its delegated Collection are deployed. Local test
+  networks use the same vector by default, may pin an explicitly reviewed
+  local profile through `NetworkConfig.dns_root_addr`, and may request an
+  absent parameter only to rehearse the fail-closed/governance recovery path.
+  Both genesis pinning and a validator-voted Config Contract replacement have
+  been rehearsed on localnet; no DNS-specific consensus mechanism is needed.
 - **Parameter 4 is critical but not mandatory in the TIP-1 candidate.** The genesis lists are
   `mandatory_params = (0 1 9 10 12 14 15 16 17 18 20 21 22 23 24 25 28 34)` and
   `critical_params = (-999 -1000 -1001 0 1 3 4 9 10 12 14 15 16 17 32 34 36)`
@@ -409,9 +407,12 @@ governance question below sharper rather than softer.
 root changes the namespace for every client, so the implementation candidate
 adds 4 to `critical_params`. It deliberately does not make DNS mandatory:
 absence remains a supported state and clients report "DNS unavailable", never
-"name not found". Mainnet activation must deploy the immutable Root and
-Collection first and then introduce parameter 4 through the critical governance
-path (or pin it in a new genesis).
+"name not found". The canonical mainnet zero-state already pins the immutable
+Root address. Launch operations must deploy the byte-identical Root and
+Collection, verify their code/StateInit hashes from independent nodes, and
+leave registration to the contract's `2027-01-01T00:00:00Z` gate. A network
+whose published genesis omitted or mis-pinned parameter 4 must deploy the
+contracts first and then use the critical governance path.
 
 The upstream Collection has no emergency auction pause, and the immutability
 above means none can be added to a deployed instance. Adding one to the source
@@ -1299,7 +1300,7 @@ until a deployed, supported network capability exists.
 | `tosnetwork/tos` (`crypto/smartcont/dns/`, **ported from `ton-blockchain/dns-contract`**) | Track the latest official Root, Collection, Domain Item, auction/renewal logic, and tests. Make only reviewed deployment adaptations for `.tos`, TOS addresses, launch time, and approved TOS-denominated constants; continuously report the remaining upstream diff | Upstream-parity CI; deterministic builds and published code hashes; exact 105% bid, one-hour extension, refund, lazy-finalization, and 366-day release tests; local multi-validator lifecycle evidence |
 | `tosnetwork/tos` (confirmed generic fixes) | Fix independently reproducible inherited defects: set `get_default_max_name_size()` to 126 (`ManualDns.h:193`); correct the `min(qdomain.size(), 126)` consumed-bit cap (`lite-client.cpp:1958`); make `getTokenData` `uint256`-safe for hashed indices (`json-rpc-server-token.cpp:318, 368`). These are generic correctness fixes, not evidence that `.tos` requires a consensus fork | Boundary vectors from §4.2 passing in C++; a JSON-RPC test asserting a full 256-bit index round-trips as a decimal string; no consensus-state change |
 | `tosnetwork/tos` (production-profile client hardening) | For production clients, add a uniform eight-hop limit and cycle detection to Lite Client, Toslib, `toslib-cli`, and `rldp-http-proxy` (§8); pin every hop to one checkpoint (`ToslibClient.cpp:5468`); bound the proxy cache and make it auction/renewal-aware (§8.2); emit the structured provenance result of §8 | Each change has an independent test and can land without the DNS contracts; hop/cycle, lifecycle cache invalidation, and checkpoint consistency evidence |
-| `tosnetwork/tos` (configuration and activation) | Both activation paths are rehearsed by `scripts/dns-e2e.py`: genesis (`config.dns_root_smc!`, the commented `gen-zerostate.fif` example, the tostester `dns_root_addr` profile) and a config-change proposal accepted by validator vote on a running localnet. Parameter 4 is in the candidate critical list. One operational finding stands: the default ConfigVotingSetup (ConfigParam 11) requires multi-round validator-set rotation, so localnet rehearsals opt into a relaxed override | A localnet booted with parameter 4 set from genesis and one where it is introduced by proposal; evidence that clients fail closed while absent; mainnet uses the critical voting policy |
+| `tosnetwork/tos` (configuration and activation) | Both activation paths are rehearsed by `scripts/dns-e2e.py`: the canonical genesis pin (`config.dns_root_smc!`, also supported by the tostester `dns_root_addr` profile) and a critical config-change proposal accepted by validator vote on a running localnet. Parameter 4 is in the critical list. One operational finding stands: the default ConfigVotingSetup (ConfigParam 11) requires multi-round validator-set rotation, so localnet rehearsals opt into a relaxed override | A localnet booted with parameter 4 set from genesis and one where it is introduced by proposal; evidence that clients fail closed while absent or while the pinned Root is undeployed; mainnet uses the critical voting policy |
 | `tosnetwork/tos` (`sdk/js`) | TypeScript resolver, canonicalization, category hashes, item-address derivation, and `uint256` index handling; align `NftCollection.ts` with the TOS-TEP-62 DNS profile | Consumption of the shared vectors in TypeScript; parity with the Go and C++ implementations |
 | `tosnetwork/tos` (`tosctl`) | Add `domain normalize`, `bid`, `auction`, `finish` (sending `op::get_static_data`, per §6.4), `renew/top-up`, `release`, `transfer`, `record set/delete`, `delegate`, `resolve`, and `inspect`, using the inherited message formats with offline signing support | CLI golden vectors, exact bid-boundary and lifecycle interpretation tests, restart-safe transaction tracking, hardware/offline signer tests, and real localnet lifecycle |
 | `tosnetwork/tos-service-spec` | Specify how `.tos` aliases may identify Agent, Capability, and Messenger entry points without changing `tos_service_v1` authority | Normative boundary text, negative cases, and shared vectors; no alternate registry semantics |

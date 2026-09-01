@@ -103,11 +103,15 @@ Run the canonical production generator from the directory containing the key
 manifest:
 
 ```bash
-build/crypto/create-state \
+SOURCE_DATE_EPOCH=1789434000 build/crypto/create-state \
   -I crypto/fift/lib \
   -I crypto/smartcont \
   -s "$PWD/crypto/smartcont/gen-zerostate.fif"
 ```
+
+`1789434000` is `2026-09-15 10:00:00 JST` (`01:00:00 UTC`). The canonical
+generator rejects any different value so the published zero-state hashes do
+not inherit a build host's wall clock.
 
 The generator emits `zerostate.boc`, the basechain zerostate, their hashes, the
 main-wallet key, and the configuration-contract key. Production key custody
@@ -119,6 +123,7 @@ Inspect the initial validator set on a running node:
 ```bash
 tos-lite-client -C /data/tos-global.json -v 0 \
   -c "last" \
+  -c "getconfig 4" \
   -c "getconfig 34" \
   -c "quit"
 ```
@@ -130,6 +135,9 @@ ConfigParam 34 must show:
 - weight 17 for every descriptor;
 - the four published signing keys; and
 - the four independently derived ADNL identities.
+
+ConfigParam 4 must equal the published TIP-1 Root account id
+`280e2d46c2bea67664609ad2df6db55ef92dd257ff5b16c3317eed59fa649a32`.
 
 Also verify ConfigParams 14, 15, 16, 17, and 28 against the economic
 specification, and independently parse the zerostate to confirm its native

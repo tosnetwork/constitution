@@ -501,14 +501,14 @@ Validators do not earn merely because a wallet holds TOS. They must:
 
 ### 6.3 Approximate seven-year calibration
 
-Using the provisional genesis values and an August 1, 2026 reference start,
+Using the provisional genesis values and the September 15, 2026 mainnet genesis,
 the post-genesis validator creation target is:
 
 ```text
 499,899,000 TOS
 ```
 
-Across the 2,557 days from August 1, 2026 to August 1, 2033, the explanatory
+Across the 2,557 days from September 15, 2026 to September 15, 2033, the explanatory
 average is approximately:
 
 ```text

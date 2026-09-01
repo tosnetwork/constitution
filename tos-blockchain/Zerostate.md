@@ -21,6 +21,13 @@ The canonical zero-state registers only the native chains:
 
 Only the native zero-state template is valid for current genesis generation.
 
+The canonical mainnet zero-state has fixed `gen_utime = 1789434000`, which is
+`2026-09-15 10:00:00 JST` (`2026-09-15 01:00:00 UTC`). Production generation
+must set `SOURCE_DATE_EPOCH=1789434000`; the generator rejects any other clock.
+It also pins ConfigParam 4 to the counterfactual TIP-1 `.tos` Root account id.
+The Root and Collection are deployed after genesis from audited StateInit
+artifacts and do not add a native genesis balance.
+
 ## Initial Supply
 
 The production validator-led zerostate creates a provisional **101,000 TOS**:
