@@ -1,21 +1,18 @@
 # TOS Validator-Led Distribution and Bootstrap Economics
 
 **Status:** Draft implementation candidate; production launch gates remain open<br>
-**Version:** 0.6<br>
-**Date:** August 12, 2026<br>
+**Version:** 0.7<br>
+**Date:** October 28, 2026<br>
 **Target activation:** New mainnet genesis after all launch gates in Section 14 pass
 
-**Version 0.6 revision note:** Version 0.5 routed essentially the entire
-five-billion-TOS supply target through validator block rewards. Version 0.6 is
-a deliberate monetary-policy revision: validator block rewards are recalibrated
-to create approximately **500 million TOS**, and the remaining approximately
-**4.5 billion TOS** community-agent allocation is created later through a
-separate protocol reward mechanism (the Artificial Intelligence Proof of Work, AIPoW,
-community distribution), which is specified outside this document, is not funded at
-genesis, and is never held by any treasury wallet. Everything else in this
-document — the bootstrap procedure, genesis balances, election parameters,
-reward routing, non-mechanisms, and transparency rules — is unchanged in
-structure and applies to the validator reward stream only.
+**Version 0.7 revision note (2026-10-28):** Version 0.6's 500M validator /
+4.5B community-agent / 7-year policy is superseded by the two-year bootstrap
+in tos commit `60e5a7371`, which the owner confirmed on 2026-10-28 as the canonical policy.
+The policy now targets approximately 10,000,000 TOS gross, including genesis,
+over roughly two years, followed by governance-targeted issuance of about 2%
+of prevailing supply per year. There is no fixed maximum supply or separate
+community or proof-of-work issuance. ConfigParam 14 remains a flat per-block
+rate until governance changes it; no automatic two-year transition is encoded.
 
 ## 1. Purpose and status
 
@@ -33,9 +30,10 @@ The design preserves the protocol's existing mechanisms:
 
 The design does **not** introduce a new emission state machine, a new time
 authority, a missed-emission debt, or a per-validator work-proof protocol.
-Seven years and five hundred million TOS of validator creation — within the
-network's five-billion total-supply policy — are planning targets, not new
-consensus invariants.
+Approximately 10,000,000 TOS of gross creation, including genesis, over roughly
+two years is a bootstrap planning target, not a new consensus invariant. TOS
+has no fixed maximum supply; the later policy targets about 2% of prevailing
+supply per year through validator rewards.
 
 The policy commitments are:
 
@@ -46,17 +44,19 @@ The policy commitments are:
    stake principal for each original validator, plus a measured and capped
    bootstrap fee allowance.
 4. There is no proof-of-work giver and no large main-wallet premine.
-5. Approximately 500 million TOS is created through ordinary validator block
-   rewards; the remaining community-agent allocation is created through a
-   separate protocol reward mechanism specified outside this document and is
-   not part of genesis or of the validator reward path.
-6. The initial block-reward rate targets approximately five hundred million
-   TOS of gross validator creation over approximately seven years.
-7. Actual completion may occur earlier or later, and final gross validator
-   creation may be modestly above or below five hundred million TOS.
+5. All native creation follows the validator-led genesis bootstrap and ordinary
+   finalized-block reward path. There is no separate service-work, community,
+   proof-of-work, team, investor, foundation, or treasury issuance allocation.
+6. The initial block-reward rate targets approximately 9,899,000 TOS of
+   post-genesis validator creation over roughly two years; adding the
+   provisional 101,000 TOS genesis gives approximately 10,000,000 TOS gross.
+7. Actual creation follows block production and may be above or below the
+   bootstrap target at the end of roughly two years.
 8. A network outage creates no reward debt. No skipped reward is backfilled.
-9. Reward creation is stopped or tapered through the existing configuration
-   governance process when the public supply target is approached.
+9. Governance re-parameterizes ConfigParam 14 at the end of the bootstrap to
+   track approximately 2% of prevailing supply per year for validators. Until
+   that proposal activates, the flat bootstrap rate continues; there is no
+   automatic transition.
 
 The implementation branch replaces the legacy main-wallet premine and
 one-validator bootstrap with the genesis balances and validator parameters in
@@ -95,32 +95,29 @@ and the validator's proportional share of the active set's bonus pool.
 
 ### 3.1 Policy targets
 
-| Parameter | Version 0.6 policy |
+| Parameter | Version 0.7 policy |
 |---|---:|
 | Smallest unit | 1 nanotomi |
 | Unit conversion | 1 TOS = 1,000,000,000 nanotomi |
-| Approximate total network supply target | 5,000,000,000 TOS |
-| Approximate validator-reward creation target | 500,000,000 TOS |
-| Community-agent allocation (separate mechanism, out of scope here) | 4,500,000,000 TOS |
+| Approximate two-year bootstrap target, gross, including genesis | 10,000,000 TOS |
 | Provisional main-wallet genesis balance | 100,000 TOS |
 | Elector genesis reserve | 500 TOS |
 | Configuration-contract genesis reserve | 500 TOS |
 | Provisional total genesis supply | 101,000 TOS |
-| Reference post-genesis validator creation | 499,899,000 TOS |
+| Reference post-genesis validator creation | 9,899,000 TOS |
 | Proof-of-work giver allocation | 0 TOS |
 | Team, investor, foundation, and ecosystem allocation | 0 TOS |
 | Protocol treasury allocation | 0 TOS |
-| Target validator distribution duration | Approximately 7 years |
+| Target bootstrap distribution duration | Approximately two years |
+| Post-bootstrap validator issuance | Approximately 2% of prevailing supply per year |
 | Treatment of outages | No creation and no later catch-up |
-| Reward termination | ConfigParam 14 is tapered or set to zero through configuration governance |
-| Hard protocol supply cap | None added by this proposal |
+| Reward continuity | Perpetual; governance re-parameterizes ConfigParam 14 to track the target rate |
+| Fixed maximum supply cap | None |
 
-The community-agent allocation is a policy target only. It is not created at
-genesis, is not held by any wallet, and is not distributed through ConfigParam
-14 or the Elector. Its reward mechanism, eligibility, and anti-abuse rules are
-specified in the separate Artificial Intelligence Proof of Work (AIPoW) community
-distribution design
-and must pass their own launch gates before any of that allocation is created.
+There is no separate service-work, community, proof-of-work, team, investor,
+foundation, or treasury issuance allocation. The post-bootstrap annual rate is
+an adjustable governance target, not a consensus-frozen constant. ConfigParam
+14 does not encode a two-year transition or a supply limit.
 
 The main-wallet amount is provisional until the four-validator, two-overlapping-
 election test has measured actual wallet, message, election, and recovery
@@ -137,15 +134,15 @@ provisional_genesis_supply =
   = 101,000 TOS
 
 reference_post_genesis_validator_creation =
-    500,000,000 TOS validator-reward target
-  -     101,000 TOS provisional genesis supply
-  = 499,899,000 TOS
+    10,000,000 TOS gross bootstrap target
+  -    101,000 TOS provisional genesis supply
+  =  9,899,000 TOS
 ```
 
 This identity is a calibration target, not a block-validity rule. ConfigParam
 14 creates a fixed amount for each produced block. Actual block cadence,
 validator availability, shard activity, configuration activation delay, and
-the eventual stop transaction determine the final result.
+the eventual governance re-parameterization determine the realized bootstrap total.
 
 ### 3.2 Gross, outstanding, and circulating supply
 
@@ -164,22 +161,23 @@ supply but does not erase it from gross native creation.
 
 ### 3.3 No exact cap or exact deadline
 
-Version 0.6 intentionally does not add:
+Version 0.7 intentionally does not add:
 
 - a `validator_emission_issued` consensus counter;
 - a supply-target rejection condition;
 - calendar-year emission tranches;
-- anniversary-bound reward logic;
+- calendar-bound reward logic;
 - a new consensus-time commitment;
 - `pending_emission`;
 - a catch-up or recovery queue; or
-- an automatic seventh-anniversary stop.
+- an automatic two-year transition or stop.
 
-If the network creates blocks faster than forecast, the target may be reached
-in less than seven years. If blocks are slower or the network is unavailable,
-the target may take longer than seven years. If governance activation occurs
-slightly before or after the target, final gross validator creation may be
-slightly below or above five hundred million TOS.
+If the network creates blocks faster than forecast, the bootstrap target may
+be reached in less than two years. If blocks are slower or the network is
+unavailable, the target may take longer. The gross total at the end of roughly
+two years depends on production and governance activation timing. The flat
+rate continues until governance changes ConfigParam 14, even if the bootstrap
+target has already been reached.
 
 These deviations must be measured and published. They are not protocol faults
 under this specification.
@@ -361,7 +359,7 @@ holds the factor in units of 1/65536, and genesis sets it to 65,536 — a factor
 of one — so every elected validator carries the weight of the smallest one and
 a four-validator set is equal-weight no matter what its members submitted.
 
-Version 0.6 adds no validator-count-dependent factor formula to the Elector.
+Version 0.7 adds no validator-count-dependent factor formula to the Elector.
 Raising the factor is an ordinary configuration change, not an automatic
 consensus rule.
 
@@ -499,25 +497,20 @@ Validators do not earn merely because a wallet holds TOS. They must:
 - remain subject to complaints and penalties; and
 - recover stake and bonuses through the existing Elector interface.
 
-### 6.3 Approximate seven-year calibration
+### 6.3 Two-year bootstrap calibration
 
-Using the provisional genesis values and the September 15, 2026 mainnet genesis,
-the post-genesis validator creation target is:
-
-```text
-499,899,000 TOS
-```
-
-Across the 2,557 days from September 15, 2026 to September 15, 2033, the explanatory
-average is approximately:
+Using the provisional genesis values, the reference post-genesis bootstrap
+creation target is:
 
 ```text
-195,502.15 TOS per day
-2.26276 TOS per second
+10,000,000 TOS gross bootstrap target - 101,000 TOS genesis
+  = 9,899,000 TOS post-genesis validator creation
 ```
 
-These numbers do not appear in block validation. They are used only to
-calibrate ConfigParam 14 from observed production behavior.
+The calibration in tos commit `60e5a7371` uses roughly two years (approximately
+730 days) and preserves the existing measured block-rate assumptions. These
+numbers do not appear as a schedule or limit in block validation; they explain
+the ConfigParam 14 calibration.
 
 Let:
 
@@ -544,22 +537,41 @@ report must include:
 - validator downtime;
 - shard split and merge behavior;
 - the chosen masterchain-to-basechain reward ratio;
-- projected one-, three-, five-, and seven-year creation; and
+- projected one- and two-year bootstrap creation and post-bootstrap annual creation; and
 - sensitivity to faster and slower production.
 
-The implementation candidate uses:
+The implementation in tos commit `60e5a7371` uses:
 
 ```text
-R_mc = 0.569879384 TOS
-R_bc = 0.335223167 TOS
+R_mc = 0.039496630 TOS = 39,496,630 nanotos per masterchain block
+R_bc = 0.023233312 TOS = 23,233,312 nanotos per basechain block
+R_mc / R_bc ≈ 1.7:1 (rounded to integer nanotos)
+
+lambda_mc = 2.5 finalized masterchain blocks per second
+lambda_bc = 2.5 finalized unsplit-basechain blocks per second (depth = 0)
+
+expected_TOS_per_second = 2.5 * (0.039496630 + 0.023233312)
+                        = 0.156824855 TOS
+expected_TOS_per_day    = 0.156824855 * 86,400
+                        = 13,549.667472 TOS
+730_day_creation        = 13,549.667472 * 730
+                        = 9,891,257.254560 TOS ≈ 9,899,000 TOS
+730_day_gross_creation  = 9,891,257.254560 + 101,000
+                        = 9,992,257.254560 TOS ≈ 10,000,000 TOS
 ```
 
-These values retain a 1.7:1 masterchain-to-basechain ratio and project
-499,899,000.147912 TOS over 2,557 days at the locally measured 2.5
-masterchain and 2.5 unsplit-basechain blocks per second. These values remain
-candidates until their derivation, one-offline-validator behavior, and
-sensitivity to sustained multi-host production are independently verified and
-launch gate 11 is closed.
+The small difference from the reference target reflects the approximate
+730-day horizon used here; the reference reward target is reached at about
+730.57 days under these assumptions. At these block rates, the flat rate creates about
+4.95 million TOS per 365-day year. It continues until governance changes
+ConfigParam 14; neither a two-year cutoff nor the later approximately 2%
+annual policy is encoded in these values.
+
+The locally measured 2.5 masterchain and 2.5 unsplit-basechain blocks per
+second remain calibration assumptions. Their derivation, one-offline-validator
+behavior, and sensitivity to sustained multi-host production must still be
+independently verified before launch gate 11 is closed. Actual creation
+follows finalized block production, and outages create nothing with no catch-up.
 
 ### 6.4 Outages and restarts
 
@@ -580,7 +592,7 @@ There is:
 - no first-block recovery reward;
 - no outage debt;
 - no missed-epoch queue; and
-- no extension automatically added to a seven-year calendar.
+- no extension automatically added to the two-year bootstrap period.
 
 ### 6.5 Shards and block cadence
 
@@ -593,27 +605,32 @@ actual total.
 The supply dashboard must use finalized on-chain `funds_created` values rather
 than estimates based only on wall-clock time or shard count.
 
-### 6.6 Taper and stop procedure
+### 6.6 Post-bootstrap governance re-parameterization
 
-There is no automatic supply stop in Version 0.6. Governance must manage the
-end of the initial distribution using existing configuration proposals.
+At the end of the roughly two-year bootstrap, governance re-parameterizes
+ConfigParam 14 to track approximately 2% of prevailing supply per year,
+allocated to validators. This is a separate later configuration proposal, not
+an encoded schedule or an automatic transition. Until the proposal activates,
+the flat bootstrap rate continues, creating about 4.95 million TOS per year
+under the Section 6.3 block-rate assumptions.
 
-The recommended procedure is:
+The procedure is:
 
-1. Publish cumulative gross creation continuously.
+1. Publish cumulative gross, burned, outstanding, and circulating supply
+   continuously.
 2. Publish projections based on trailing 30-, 90-, and 180-day block rates.
-3. Begin a public taper review before projected gross validator creation
-   reaches 495 million TOS.
-4. Reduce ConfigParam 14 values if proposal activation delay could produce a
-   material overshoot.
-5. Set both masterchain and basechain creation values to zero near the
-   500-million validator-creation policy target.
-6. Publish the final gross, burned, outstanding, and circulating figures.
+3. Prepare and publicly review the post-bootstrap ConfigParam 14 proposal in
+   time for governance activation at the end of the bootstrap.
+4. Disclose the prevailing-supply basis, measured block rates, proposed
+   masterchain and basechain values, activation delay, and projected annual
+   creation used to target approximately 2% per year.
+5. Verify activation on-chain and publish the realized bootstrap totals.
+6. Monitor and adjust ConfigParam 14 through ordinary configuration governance
+   so continuing annual creation tracks the disclosed target.
 
-Transaction, storage, forwarding, and service fees continue after native block
-creation is set to zero. Future inflation must not be implied by this
-specification; any proposal to restart native creation is a separate monetary
-policy decision requiring prominent public review.
+Validator issuance is intended to continue perpetually alongside transaction,
+storage, forwarding, and service fees. The annual percentage is an adjustable
+governance target, not a fixed consensus rule or a guaranteed validator yield.
 
 ## 7. Fees, penalties, and burns
 
@@ -633,7 +650,7 @@ create new slashing evidence, new reward eligibility proofs, or a new burn
 replacement allowance.
 
 Burned bootstrap funds, fees, and penalties are not automatically recreated.
-The approximate 500-million validator target concerns gross validator
+The approximate 10-million bootstrap target includes gross genesis and validator
 creation, while burns reduce outstanding supply.
 
 ## 8. Governance and custody
@@ -690,7 +707,7 @@ Production genesis and configuration must not fund or register:
 
 ## 9. Protocol invariants retained
 
-Version 0.6 relies on existing block and Elector validation. It adds no new
+Version 0.7 relies on existing block and Elector validation. It adds no new
 monetary consensus fields. The implementation must continue to enforce:
 
 1. ConfigParam 14 determines the native amount created for each applicable
@@ -716,8 +733,9 @@ invariants:
 - equal bootstrap transfers;
 - no giver allocation;
 - residual bootstrap burn;
-- approximate seven-year duration; and
-- approximate 500-million gross validator-creation target.
+- approximate two-year bootstrap duration;
+- approximate 10-million gross bootstrap target, including genesis; and
+- post-bootstrap issuance targeting approximately 2% of prevailing supply per year.
 
 ## 10. Explicitly rejected mechanisms
 
@@ -728,7 +746,7 @@ This version must not be implemented by adding any of the following:
 - `validator_emission_issued` as consensus state;
 - `pending_emission`;
 - a fixed recovery ring;
-- anniversary tranches;
+- calendar-based issuance tranches;
 - a validator-emission debt;
 - a consensus-time authority created only for token issuance;
 - `WorkAssignmentCommitment`;
@@ -747,7 +765,7 @@ Removing these mechanisms is a design requirement, not a deferred feature.
 
 Update `crypto/smartcont/gen-zerostate.fif` to:
 
-- replace the near-five-billion main-wallet balance with the audited bounded
+- replace the legacy main-wallet premine with the audited bounded
   bootstrap balance;
 - retain exactly 500 TOS for the Elector;
 - retain exactly 500 TOS for the Configuration contract;
@@ -794,8 +812,10 @@ test proves a timing defect.
 ### 11.3 Block-reward configuration
 
 - Measure finalized production rate on a four-validator test network.
-- Select ConfigParam 14 values that project approximately
-  499,899,000 TOS of post-genesis validator creation over seven years.
+- Verify the ConfigParam 14 values from tos `60e5a7371` against the approximately
+  9,899,000 TOS post-genesis bootstrap target over roughly two years.
+- Rehearse the later governance re-parameterization to target approximately
+  2% of prevailing supply per year; verify that no automatic transition occurs.
 - Verify depth-adjusted basechain creation across split and merge tests.
 - Verify the collector fallback or explicitly configure the Elector as fee
   collector.
@@ -837,14 +857,14 @@ architecture.
 Before this specification becomes canonical, update every document that
 describes:
 
-- the current five-billion main-wallet premine;
+- the legacy main-wallet premine;
 - proof-of-work or giver distribution;
 - genesis supply;
 - validator reward availability;
 - validator minimums and stake limits;
 - original validator funding;
 - exact supply-cap claims;
-- exact seven-year release claims; or
+- exact bootstrap release or automatic-transition claims; or
 - main-wallet custody.
 
 At minimum, inspect:
@@ -930,7 +950,7 @@ At minimum, inspect:
 
 ### 12.6 Memory and denial-of-service
 
-Version 0.6 adds no per-epoch emission queue, reward commitment, work proof,
+Version 0.7 adds no per-epoch emission queue, reward commitment, work proof,
 or recovery ring. Tests must nevertheless confirm:
 
 - no new unbounded in-memory state is introduced by supply telemetry;
@@ -988,7 +1008,7 @@ Expose:
 
 The dashboard must derive authoritative totals from finalized chain data. It
 must label projections as estimates and must not display a guaranteed
-supply cap or guaranteed seven-year completion date.
+supply cap or guaranteed two-year completion date.
 
 ### 13.3 Validator dashboard
 
@@ -1008,7 +1028,7 @@ Expose:
 
 Production genesis must not launch until:
 
-1. The near-five-billion current main-wallet allocation has been replaced by
+1. The legacy main-wallet premine has been replaced by
    the audited bounded bootstrap balance.
 2. Exactly four original validators and four ADNL identities are committed in
    zerostate with equal weight.
@@ -1035,8 +1055,9 @@ Production genesis must not launch until:
 15. Long-running election and reward tests show no unexplained anonymous RSS
     growth.
 16. All affected documents, generated white paper, README, and public website
-    agree that 500 million TOS of validator creation (within the five-billion
-    total-supply policy) and seven years are approximate policy targets.
+    agree on no fixed maximum supply, an approximate 10-million-TOS gross
+    bootstrap over roughly two years, and later governance-targeted issuance
+    of about 2% of prevailing supply per year with no automatic transition.
 17. The launch team publishes every known deviation from this specification.
 
 ## 15. Principal risks
@@ -1065,7 +1086,7 @@ cap.
 ### 15.4 Variable completion date
 
 Block production is not a calendar clock. Network conditions can cause the
-distribution to complete materially earlier or later than seven years.
+bootstrap target to be reached materially earlier or later than two years.
 
 ### 15.5 Stake concentration
 
@@ -1075,10 +1096,11 @@ floor but does not prevent one controller from operating multiple identities.
 
 ### 15.6 Long-term validator economics
 
-After ConfigParam 14 is set to zero, validators depend on transaction, storage,
-message, and protocol-service fees. Reward taper decisions must consider
-network security and sustainable fee demand without implying a guaranteed
-return.
+After the bootstrap, validators receive continuing issuance targeted at about
+2% of prevailing supply per year, alongside transaction, storage, message, and
+protocol-service fees. Governance must calibrate rewards to network security
+and sustainable fee demand without implying a guaranteed return. Delayed
+re-parameterization leaves the higher flat bootstrap rate in effect.
 
 ## 16. Final design statement
 
@@ -1091,20 +1113,20 @@ balance.
 
 After bootstrap, the network uses its existing block-creation, fee-collection,
 Elector, staking, election, complaint, and reward-distribution mechanisms.
-ConfigParam 14 is calibrated to create approximately 500 million TOS through
-validator rewards over roughly seven years. Issuance follows actual block
+ConfigParam 14 is calibrated to create approximately 9,899,000 TOS through
+validator rewards over roughly two years, bringing gross creation including
+genesis to approximately 10,000,000 TOS. Issuance follows actual block
 production: outages are not backfilled, faster production releases TOS sooner,
 and slower production releases it later.
 
-The remaining approximately 4.5 billion TOS of the five-billion total-supply
-policy is a community-agent allocation created through a separate protocol
-reward mechanism (the Artificial Intelligence Proof of Work, AIPoW, community distribution). It is
-specified outside this document, is not funded at genesis, is never held by a
-treasury wallet, and must pass its own launch gates before any of it is
-created.
+TOS has no fixed maximum supply. After the bootstrap, governance targets
+continuing validator issuance at about 2% of prevailing supply per year through
+a separate ConfigParam 14 proposal. Until it activates, the flat bootstrap
+rate continues; no automatic two-year transition is encoded. There is no
+separate service-work, community, proof-of-work, team, investor, foundation,
+or treasury issuance allocation.
 
-Five hundred million TOS of validator creation, five billion TOS of total
-supply, and seven years are transparent policy targets, not exact consensus
-guarantees. No pending-emission debt, work-assignment commitment,
-participation commitment, new consensus-time authority, or emission recovery
-state is part of this design.
+The bootstrap total and duration and the later annual percentage are
+transparent policy targets, not exact consensus guarantees. No pending-emission
+debt, work-assignment commitment, participation commitment, new consensus-time
+authority, or emission recovery state is part of this design.
